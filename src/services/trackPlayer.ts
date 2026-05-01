@@ -70,6 +70,10 @@ export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
   );
   await TrackPlayer.add(tracks);
   await TrackPlayer.skip(startIndex);
+  // 预加载下一首（若存在），减少切歌时网络延迟
+  if (videos.length > startIndex + 1) {
+    lazyResolve(startIndex + 1).catch(() => {});
+  }
 }
 
 async function lazyResolve(index: number) {
@@ -97,31 +101,25 @@ async function lazyResolve(index: number) {
       headers = { Referer: config.referer, 'User-Agent': config.userAgent };
     }
 
-    // 检查当前播放的 track 是否仍然是我们正在解析的这个
-    const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
-    if (activeTrackIndex !== index) {
-      return; // 用户已经切歌，放弃替换
-    }
-
-    // 再次确认 placeholder 仍在该位置，防止并发解析导致重复替换
+    // 动态查找当前 placeholder 的实际索引，防止队列变化导致 index 失效
     const freshQueue = await TrackPlayer.getQueue();
-    const freshTrack = freshQueue[index];
-    if (!freshTrack || !String(freshTrack.url).startsWith('placeholder://')) {
-      return;
+    const actualIndex = freshQueue.findIndex(tr => tr.id === bvid && String(tr.url).startsWith('placeholder://'));
+    if (actualIndex === -1) {
+      return; // 找不到对应的 placeholder，可能已被用户操作移出队列或已解析
     }
 
     const newTrack = { ...t, url, headers };
-    // 【修复】平滑替换策略：先在 index 后面插入新 track，跳过去，再删掉原来的 placeholder
-    await TrackPlayer.add(newTrack, index + 1);
+    // 平滑替换策略：先在 actualIndex 后面插入新 track，跳过去，再删掉原来的 placeholder
+    await TrackPlayer.add(newTrack, actualIndex + 1);
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
-    if (postAddActiveTrackIndex === index) {
-      await TrackPlayer.skip(index + 1);
+    if (postAddActiveTrackIndex === actualIndex) {
+      await TrackPlayer.skip(actualIndex + 1);
     }
-    await TrackPlayer.remove(index);
+    await TrackPlayer.remove(actualIndex);
   } catch (error) {
     console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
     
-    // 【修复】检查网络状态，如果是无网导致的失败，停止播放并避免切歌风暴
+    // 检查网络状态，如果是无网导致的失败，停止播放并避免切歌风暴
     if (netStatus.type === 'none' || netStatus.type === 'unknown') {
       console.warn('[TrackPlayer] 无网络连接，停止解析队列');
       await TrackPlayer.pause();
@@ -130,9 +128,12 @@ async function lazyResolve(index: number) {
       return;
     }
 
-    // 解析失败时自动跳到下一首（仅当仍在同一索引）
+    // 解析失败时自动跳到下一首（仅当当前播放的确实是解析失败的这首歌）
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
-    if (activeTrackIndex === index) {
+    const freshQueue = await TrackPlayer.getQueue();
+    const activeTrack = freshQueue[activeTrackIndex];
+    
+    if (activeTrack && activeTrack.id === bvid) {
       await TrackPlayer.skipToNext().catch(() => {});
     }
   } finally {
@@ -163,7 +164,16 @@ export async function PlaybackService() {
   );
 
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (e) => {
-    if (e.index !== undefined) await lazyResolve(e.index);
+    if (e.index !== undefined) {
+      await lazyResolve(e.index);
+      // prefetch next track if exists for seamless playback
+      try {
+        const queue = await TrackPlayer.getQueue();
+        if (e.index + 1 < queue.length) {
+          lazyResolve(e.index + 1).catch(() => {});
+        }
+      } catch {}
+    }
     if (e.lastTrack?.id) autoCache(e.lastTrack.id as string);
   });
   // 【修复】增加错误监听，遇到播放错误自动跳过
