@@ -72,19 +72,28 @@ async function lazyResolve(index: number) {
   const queue = await TrackPlayer.getQueue();
   const t = queue[index];
   if (!t || !String(t.url).startsWith('placeholder://')) return;
+  
   const bvid = String(t.url).replace('placeholder://', '');
   const quality = useSettingsStore.getState().quality;
+  
+  let url = '';
+  let headers: Record<string, string> | undefined;
+  
   const cached = await audioCache.has(bvid, quality);
   if (cached) {
-    await TrackPlayer.load({ ...t, url: `file://${cached}` });
+    url = `file://${cached}`;
   } else {
     const info = await audioService.getInfo(bvid, quality);
-    await TrackPlayer.load({
-      ...t,
-      url: info.audio.baseUrl,
-      headers: { Referer: config.referer, 'User-Agent': config.userAgent },
-    });
+    url = info.audio.baseUrl;
+    headers = { Referer: config.referer, 'User-Agent': config.userAgent };
   }
+
+  const newTrack = { ...t, url, headers };
+  
+  // 无缝替换策略：插入真实音频 -> 跳至真实音频 -> 移除旧占位音频
+  await TrackPlayer.add(newTrack, index + 1);
+  await TrackPlayer.skip(index + 1);
+  await TrackPlayer.remove(index);
 }
 
 async function autoCache(bvid: string) {
