@@ -98,6 +98,16 @@ class AudioCache {
         // 触发空间回收（不需要 await，后台执行即可）
         this.tryEvict();
         return filePath;
+      } catch (error) {
+        // 下载异常，清理残余文件
+        try {
+          if (await RNFS.exists(filePath)) {
+            await RNFS.unlink(filePath);
+          }
+        } catch (cleanupError) {
+          console.error('清理残余缓存文件失败:', cleanupError);
+        }
+        throw error;
       } finally {
         // 下载结束后移除记录，确保后续请求能重新触发下载（若失败则会重新尝试）
         this.downloading.delete(cacheKey);

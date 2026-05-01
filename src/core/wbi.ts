@@ -23,7 +23,7 @@ export function encWbi(
   const mixinKey = getMixinKey(imgKey + subKey);
   const wts = Math.round(Date.now() / 1000);
   const chrFilter = /[!'()*]/g;
-  const finalParams = { ...params, wts };
+  const finalParams: Record<string, any> = { ...params, wts };
 
   const query = Object.keys(finalParams)
     .sort()

@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="false">
+    <!-- 严格 HTTPS only -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- 仅允许 B 站域名 -->
+    <domain-config>
         <domain includeSubdomains="true">bilibili.com</domain>
         <domain includeSubdomains="true">bilivideo.com</domain>
         <domain includeSubdomains="true">hdslb.com</domain>

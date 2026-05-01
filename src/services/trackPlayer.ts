@@ -6,8 +6,9 @@ import { audioCache } from './audioCache';
 import { netStatus } from './netStatus';
 import { useSettingsStore } from '../store/settingsStore';
 import { config } from '../config';
-+// 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
-+const resolving = new Set<number>();
+import { usePlayerStore } from '../store/playerStore';
+// 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
+const resolving = new Set<number>();
 import type { FavoriteVideo } from '../types/domain';
 
 let _ready = false;
@@ -75,12 +76,13 @@ async function lazyResolve(index: number) {
   // 防止同一索引并发解析导致重复替换
   if (resolving.has(index)) return;
   resolving.add(index);
+  let bvid = '';
   try {
     const queue = await TrackPlayer.getQueue();
     const t = queue[index];
     if (!t || !String(t.url).startsWith('placeholder://')) return;
     
-    const bvid = String(t.url).replace('placeholder://', '');
+    bvid = String(t.url).replace('placeholder://', '');
     const quality = useSettingsStore.getState().quality;
     
     let url = '';
@@ -118,6 +120,16 @@ async function lazyResolve(index: number) {
     await TrackPlayer.remove(index);
   } catch (error) {
     console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
+    
+    // 【修复】检查网络状态，如果是无网导致的失败，停止播放并避免切歌风暴
+    if (netStatus.type === 'none' || netStatus.type === 'unknown') {
+      console.warn('[TrackPlayer] 无网络连接，停止解析队列');
+      await TrackPlayer.pause();
+      // 通过 Zustand store 触发全局 UI 错误提示
+      usePlayerStore.getState().setPlaybackError('无网络连接，无法加载音频');
+      return;
+    }
+
     // 解析失败时自动跳到下一首（仅当仍在同一索引）
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
     if (activeTrackIndex === index) {
@@ -162,6 +174,15 @@ export async function PlaybackService() {
       console.log('[TrackPlayer] 忽略 placeholder 预期内报错');
       return;
     }
+    
+    // 【修复】如果当前无网络，暂停播放而不是跳过
+    if (netStatus.type === 'none') {
+      // 通过 Zustand store 设置全局 UI 错误提示
+      usePlayerStore.getState().setPlaybackError('网络已断开，播放暂停');
+      await TrackPlayer.pause();
+      return;
+    }
+    
     await TrackPlayer.skipToNext().catch(() => {});
   });
 }
