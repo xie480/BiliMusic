@@ -8,7 +8,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
 import { useUIStore } from '../store/uiStore';
-import { PlaylistPanel } from '../components/PlaylistPanel';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -139,8 +138,6 @@ export const PlayerScreen = () => {
         <View style={s.statusItem}>
           <Text style={s.statusText}>·  来源 {sourceText}</Text>
         </View>
-        {/* Playlist Panel Modal */}
-        <PlaylistPanel visible={playlistVisible} onClose={() => useUIStore.getState().setPlaylistVisible(false)} />
       </View>
     </View>
   );

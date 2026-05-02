@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform, Alert, ToastAndroid } from 'react-native';
+import { View, FlatList, RefreshControl, StyleSheet, TouchableOpacity, Platform, Alert, ToastAndroid, Text } from 'react-native';
 import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
 import TrackPlayer from 'react-native-track-player';
@@ -24,6 +24,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const [folders, setFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
 
   const load = useCallback(async (force = false) => {
     setError(null);
@@ -54,6 +55,16 @@ export const FoldersScreen = ({ navigation }: any) => {
       <Header
         title="收藏夹"
         showBack={false}
+        left={<TouchableOpacity onPress={() => {
+          if (isMultiSelectMode) {
+            setIsMultiSelectMode(false);
+            clear(); // 清空已选
+          } else {
+            setIsMultiSelectMode(true);
+          }
+        }}>
+          <Text style={{ color: t.colors.text, fontSize: t.fontSize.md }}>{isMultiSelectMode ? '取消' : '多选'}</Text>
+        </TouchableOpacity>}
         right={<IconButton name="cog-outline" onPress={() => navigation.navigate('Settings')} />}
       />
       {folders === null && !error ? (
@@ -75,15 +86,30 @@ export const FoldersScreen = ({ navigation }: any) => {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.colors.primary} />
           }
           renderItem={({ item }) => (
-            <TouchableOpacity onPress={() => toggle(item.id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md, paddingHorizontal: t.spacing.lg, backgroundColor: t.colors.surface }}>
-              <IconButton name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} color={t.colors.text} />
+            <TouchableOpacity
+              onPress={() => {
+                if (isMultiSelectMode) {
+                  toggle(item.id);
+                } else {
+                  navigation.navigate('Videos', { mediaId: item.id, title: item.title });
+                }
+              }}
+              style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: t.spacing.md, paddingHorizontal: t.spacing.lg, backgroundColor: t.colors.surface }}
+            >
+              {isMultiSelectMode && (
+                <IconButton name={selectedIds.has(item.id) ? 'checkbox-marked' : 'checkbox-blank-outline'} size={24} color={t.colors.text} />
+              )}
               <View style={{ flex: 1, marginLeft: t.spacing.md }}>
                 <ListItem
                   title={item.title}
                   subtitle={`${item.mediaCount} 个视频`}
                   icon="folder-music-outline"
-                  showArrow
-                  onPress={() => navigation.navigate('Videos', { mediaId: item.id, title: item.title })}
+                  showArrow={!isMultiSelectMode}
+                  onPress={() => {
+                    if (!isMultiSelectMode) {
+                      navigation.navigate('Videos', { mediaId: item.id, title: item.title });
+                    }
+                  }}
                 />
               </View>
             </TouchableOpacity>
