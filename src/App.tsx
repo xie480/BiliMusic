@@ -19,6 +19,8 @@ import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { favoriteService } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
+import { storage } from './core/storage';
+import { useSyncStore } from './store/syncStore';
 
 const Stack = createNativeStackNavigator();
 
@@ -30,6 +32,7 @@ export default function App() {
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
+  const startSync = useSyncStore(state => state.startSync);
 
   // 记录上一次的 hiddenFolderIds，用于检测变化
   const prevHiddenFolderIdsRef = useRef<number[]>(hiddenFolderIds);
@@ -68,8 +71,19 @@ export default function App() {
   // Rebuild global index on startup or when uid changes
   useEffect(() => {
     if (uid) {
+      const lastUid = storage.getString('lastUid');
+      const globalIndex = favoriteService.getGlobalIndex();
+      
+      // 仅在切换账号或本地索引为空时才重新同步
+      if (lastUid !== uid || globalIndex.length === 0) {
+        favoriteService.clearGlobalIndex();
+        startSync(uid, hiddenFolderIds).catch(console.warn);
+        storage.setString('lastUid', uid);
+      }
+    } else {
+      // 用户登出时清理数据
       favoriteService.clearGlobalIndex();
-      favoriteService.syncGlobalIndex(uid, hiddenFolderIds).catch(console.warn);
+      storage.delete('lastUid');
     }
   }, [uid]);
 
@@ -85,7 +99,8 @@ export default function App() {
 
     // 用户修改了可见收藏夹偏好，重新构建全局索引
     favoriteService.clearGlobalIndex();
-    favoriteService.syncGlobalIndex(uid, hiddenFolderIds).catch(console.warn);
+    // 使用 startSync 替代 favoriteService.syncGlobalIndex 以便 UI 正确显示同步状态
+    startSync(uid, hiddenFolderIds).catch(console.warn);
   }, [hiddenFolderIds, uid]);
 
   return (
