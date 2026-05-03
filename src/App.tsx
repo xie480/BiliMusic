@@ -17,6 +17,8 @@ import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { favoriteService } from './services/favoriteService';
+import { PlaylistPanel } from './components/PlaylistPanel';
+import { useUIStore } from './store/uiStore';
 
 const Stack = createNativeStackNavigator();
 
@@ -26,6 +28,8 @@ export default function App() {
   const navigationRef = useNavigationContainerRef();
   const uid = useUserStore((s) => s.uid);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
+  const playlistVisible = useUIStore(state => state.playlistVisible);
+  const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
 
   // 记录上一次的 hiddenFolderIds，用于检测变化
   const prevHiddenFolderIdsRef = useRef<number[]>(hiddenFolderIds);
@@ -105,6 +109,7 @@ export default function App() {
               <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreen} />
             </Stack.Navigator>
           </NavigationContainer>
+          <PlaylistPanel visible={playlistVisible} onClose={() => setPlaylistVisible(false)} />
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
 import { useUIStore } from '../store/uiStore';
-import { PlaylistPanel } from '../components/PlaylistPanel';
+// import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
 import { ProgressBar } from '../components/ProgressBar';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -23,7 +23,7 @@ export const PlayerScreen = () => {
   const playback = usePlaybackState();
   const progress = useProgress();
   const quality = useSettingsStore((s) => s.quality);
-  const playlistVisible = useUIStore(state => state.playlistVisible);
+  // const playlistVisible = useUIStore(state => state.playlistVisible); // removed, handled globally
 
   const isPlaying = playback.state === State.Playing;
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
@@ -138,8 +138,7 @@ export const PlayerScreen = () => {
         <View style={s.statusItem}>
           <Text style={s.statusText}>·    来源 {sourceText}</Text>
         </View>
-        {/* Playlist Panel Modal */}
-        <PlaylistPanel visible={playlistVisible} onClose={() => useUIStore.getState().setPlaylistVisible(false)} />
+        {/* Playlist Panel Modal removed; now rendered globally in App */}
       </View>
     </View>
   );

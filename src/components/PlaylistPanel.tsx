@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, memo } from 'react';
 import { View, Text, StyleSheet, Modal } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
@@ -18,28 +18,33 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
   const playMode = usePlayerStore((s) => s.playMode);
   const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
+  const ITEM_HEIGHT = 70; // approximate fixed height for list item
+
+  const PlaylistItem = memo(({ item, drag, isActive, getIndex }: RenderItemParams<FavoriteVideo>) => (
+    <TouchableOpacity
+      style={[styles.item, { backgroundColor: isActive ? t.colors.surfaceHigh : t.colors.surface }]}
+      onLongPress={drag}
+      activeOpacity={0.8}
+    >
+      <View style={styles.info}>
+        <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+        <Text style={styles.sub} numberOfLines={1}>{item.upper.name}</Text>
+      </View>
+      <View style={styles.actions}>
+        {/* 删除按钮 */}
+        <IconButton
+          name="delete"
+          size={20}
+          color={t.colors.error}
+          onPress={() => removeFromQueue(item.bvid)}
+        />
+      </View>
+    </TouchableOpacity>
+  ));
 
   const renderItem = useCallback(
-    ({ item, drag, isActive }: RenderItemParams<FavoriteVideo>) => (
-      <TouchableOpacity
-        style={[styles.item, { backgroundColor: isActive ? t.colors.surfaceHigh : t.colors.surface } ]}
-        onLongPress={drag}
-        activeOpacity={0.8}
-      >
-        <View style={styles.info}>
-          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.sub} numberOfLines={1}>{item.upper.name}</Text>
-        </View>
-        <View style={styles.actions}>
-          {/* 删除按钮 */}
-          <IconButton
-            name="delete"
-            size={20}
-            color={t.colors.error}
-            onPress={() => removeFromQueue(item.bvid)}
-          />
-        </View>
-      </TouchableOpacity>
+    ({ item, drag, isActive, getIndex }: RenderItemParams<FavoriteVideo>) => (
+      <PlaylistItem item={item} drag={drag} isActive={isActive} getIndex={getIndex} />
     ),
     [t.colors, removeFromQueue]
   );
@@ -66,6 +71,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
             renderItem={renderItem}
             onDragEnd={handleDragEnd}
             contentContainerStyle={styles.list}
+            getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
+            initialNumToRender={5}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            removeClippedSubviews={true}
           />
         </View>
       </View>

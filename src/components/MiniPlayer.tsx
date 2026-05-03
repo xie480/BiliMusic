@@ -8,7 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
 import { useTheme } from '../theme';
 import { useUIStore } from '../store/uiStore';
-import { PlaylistPanel } from './PlaylistPanel';
+// PlaylistPanel import removed to avoid duplicate modal rendering
 
 export const MiniPlayer: React.FC = () => {
   const t = useTheme();
@@ -16,7 +16,7 @@ export const MiniPlayer: React.FC = () => {
   const playback = usePlaybackState();
   const progress = useProgress();
   const nav = useNavigation<any>();
-  const playlistVisible = useUIStore(state => state.playlistVisible);
+  // Removed playlistVisible reference; will be handled globally
 
   if (!track) return null;
   const isPlaying = playback.state === State.Playing;
@@ -50,39 +50,36 @@ export const MiniPlayer: React.FC = () => {
   });
 
   return (
-    <>
-      <View style={s.wrap}>
-        <View style={s.progress}>
-          <View style={[s.progressFill, { width: `${p * 100}%` }]} />
-        </View>
-        <View style={s.row}>
-          <TouchableOpacity onPress={() => nav.navigate('Player')} activeOpacity={0.7}>
-            <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.info}
-            activeOpacity={0.7}
-            onPress={() => nav.navigate('Player')}
-          >
-            <Text style={s.title} numberOfLines={1}>{track.title}</Text>
-            <Text style={s.artist} numberOfLines={1}>{track.artist}</Text>
-          </TouchableOpacity>
-          <View style={s.actions}>
-            <IconButton
-              name={isPlaying ? 'pause' : 'play'}
-              size={26}
-              color={t.colors.text}
-              onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
-            />
-            <IconButton name="skip-next" size={26} color={t.colors.text}
-                        onPress={() => TrackPlayer.skipToNext()} />
-            {/* Playlist button */}
-            <IconButton name="playlist-music" size={24} color={t.colors.text}
-                        onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
-          </View>
+    <View style={s.wrap}>
+      <View style={s.progress}>
+        <View style={[s.progressFill, { width: `${p * 100}%` }]} />
+      </View>
+      <View style={s.row}>
+        <TouchableOpacity onPress={() => nav.navigate('Player')} activeOpacity={0.7}>
+          <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={s.info}
+          activeOpacity={0.7}
+          onPress={() => nav.navigate('Player')}
+        >
+          <Text style={s.title} numberOfLines={1}>{track.title}</Text>
+          <Text style={s.artist} numberOfLines={1}>{track.artist}</Text>
+        </TouchableOpacity>
+        <View style={s.actions}>
+          <IconButton
+            name={isPlaying ? 'pause' : 'play'}
+            size={26}
+            color={t.colors.text}
+            onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
+          />
+          <IconButton name="skip-next" size={26} color={t.colors.text}
+                      onPress={() => TrackPlayer.skipToNext()} />
+          {/* Playlist button */}
+          <IconButton name="playlist-music" size={24} color={t.colors.text}
+                      onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>
       </View>
-      <PlaylistPanel visible={playlistVisible} onClose={() => useUIStore.getState().setPlaylistVisible(false)} />
-    </>
+    </View>
   );
 };
