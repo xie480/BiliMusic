@@ -23,6 +23,8 @@ jest.mock('../src/core/storage', () => ({
     setJSON: jest.fn(),
     getJSON: jest.fn(),
     delete: jest.fn(),
+    getSyncMetaMap: jest.fn(() => ({})),
+    setSyncMetaMap: jest.fn(),
   }
 }));
 

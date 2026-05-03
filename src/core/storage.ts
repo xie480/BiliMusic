@@ -1,4 +1,5 @@
 import { MMKV } from 'react-native-mmkv';
+import type { FolderSyncMeta } from '../types/domain';
 
 const mmkv = new MMKV({ id: 'bili-music' });
 
@@ -25,5 +26,35 @@ export const storage = {
     for (const k of mmkv.getAllKeys()) {
       if (k.startsWith(prefix)) mmkv.delete(k);
     }
+  },
+
+  // ─── 增量同步元数据存取 ───────────────────────────────
+  /** 获取所有收藏夹的同步元数据 */
+  getSyncMetaMap(): Record<number, FolderSyncMeta> {
+    return this.getJSON<Record<number, FolderSyncMeta>>('syncMetaMap') || {};
+  },
+
+  /** 覆盖写入全部同步元数据（原子性保存） */
+  setSyncMetaMap(map: Record<number, FolderSyncMeta>): void {
+    this.setJSON('syncMetaMap', map);
+  },
+
+  /** 更新单个收藏夹的同步元数据（读-改-写，保证不丢失其他文件夹的元数据） */
+  updateSyncMeta(folderId: number, meta: FolderSyncMeta): void {
+    const map = this.getSyncMetaMap();
+    map[folderId] = meta;
+    this.setSyncMetaMap(map);
+  },
+
+  /** 删除单个收藏夹的同步元数据 */
+  deleteSyncMeta(folderId: number): void {
+    const map = this.getSyncMetaMap();
+    delete map[folderId];
+    this.setSyncMetaMap(map);
+  },
+
+  /** 清除全部同步元数据（恢复全量同步状态） */
+  clearSyncMeta(): void {
+    this.delete('syncMetaMap');
   },
 };

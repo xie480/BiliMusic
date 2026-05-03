@@ -44,3 +44,13 @@ export interface PageResult<T> {
   list: T[];
   hasMore: boolean;
 }
+
+/** 收藏夹同步元数据 - 用于增量同步的状态追踪 */
+export interface FolderSyncMeta {
+  folderId: number;
+  lastSyncTime: number;
+  latestBvid: string | null;
+  mediaCount: number;
+  /** 标记该文件夹需要下次全量校准（检测到删除或同步中断时设置） */
+  needsFullSync?: boolean;
+}
