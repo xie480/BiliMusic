@@ -93,7 +93,6 @@ export const PlayerScreen = () => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} />
       <View style={s.header}>
         <IconButton name="chevron-down" size={28} onPress={() => nav.goBack()} />
-        <IconButton name="dots-horizontal" size={24} />
         <IconButton name="playlist-music" size={24} color={t.colors.text}
           onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
       </View>
@@ -137,7 +136,7 @@ export const PlayerScreen = () => {
           <Text style={s.statusText}>音质 {qualityText}</Text>
         </View>
         <View style={s.statusItem}>
-          <Text style={s.statusText}>·  来源 {sourceText}</Text>
+          <Text style={s.statusText}>·    来源 {sourceText}</Text>
         </View>
         {/* Playlist Panel Modal */}
         <PlaylistPanel visible={playlistVisible} onClose={() => useUIStore.getState().setPlaylistVisible(false)} />
