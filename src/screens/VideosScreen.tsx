@@ -1,9 +1,16 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, FlatList, TouchableOpacity, Text, StyleSheet,
+  View,
+  FlatList,
+  TouchableOpacity,
+  Text,
+  StyleSheet,
   ActivityIndicator,
-  Alert, Platform, ToastAndroid,
+  Alert,
+  Platform,
+  ToastAndroid,
   Modal,
+  TextInput,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -11,7 +18,6 @@ import TrackPlayer from 'react-native-track-player';
 import { IconButton } from '../components/IconButton';
 import { SafeAreaView, StatusBar } from 'react-native';
 import { Header } from '../components/Header';
-// Removed duplicate import, already imported above
 import { Loading } from '../components/Loading';
 import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
@@ -31,7 +37,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const { mediaId, title } = route.params;
   const setQueue = usePlayerStore((s) => s.setQueue);
   const insertNext = usePlayerStore((s) => s.insertNext);
-  // Refs to keep pagination state up‑to‑date across closures
+  // pagination refs
   const pageRef = useRef(1);
   const hasMoreRef = useRef(true);
   const loadingRef = useRef(false);
@@ -45,6 +51,10 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const [error, setError] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<FavoriteVideo | null>(null);
+
+  // 新增搜索和排序状态
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState<'default' | 'title' | 'duration'>('default');
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMoreRef.current) return;
@@ -70,7 +80,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
       }
 
       const r = await favoriteService.getVideos(mediaId, pageRef.current);
-      // Merge with existing list using ref to avoid stale closures
       const newList = [...listRef.current, ...r.list];
       setList(newList);
       listRef.current = newList;
@@ -88,7 +97,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
     }
   }, [mediaId]);
 
-  // Reset pagination refs when mediaId changes
+  // Reset pagination when mediaId changes
   useEffect(() => {
     setList([]);
     setPage(1);
@@ -103,7 +112,6 @@ export const VideosScreen = ({ route, navigation }: any) => {
     loadMore();
   }, [mediaId]);
 
-  // Ensure all pages are loaded before playing whole list
   const ensureAllLoaded = async () => {
     while (hasMoreRef.current) {
       await loadMore();
@@ -158,19 +166,45 @@ export const VideosScreen = ({ route, navigation }: any) => {
     }
   };
 
+  // Filtering and sorting for display
+  const filteredList = list.filter(v => v.title.toLowerCase().includes(searchQuery.toLowerCase()));
+  const displayedList = (() => {
+    if (sortOption === 'title') {
+      return [...filteredList].sort((a, b) => a.title.localeCompare(b.title));
+    }
+    if (sortOption === 'duration') {
+      return [...filteredList].sort((a, b) => a.duration - b.duration);
+    }
+    return filteredList;
+  })();
+
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
     actions: {
-      flexDirection: 'row', padding: t.spacing.lg, gap: t.spacing.md,
+      flexDirection: 'row',
+      padding: t.spacing.lg,
+      gap: t.spacing.md,
     },
     actionBtn: { flex: 1 },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: t.colors.surfaceHigh,
+      borderRadius: 20,
+      paddingHorizontal: t.spacing.md,
+      height: 40,
+      marginHorizontal: t.spacing.lg,
+      marginVertical: t.spacing.md,
+    },
     item: {
       flexDirection: 'row',
       paddingHorizontal: t.spacing.lg,
       paddingVertical: t.spacing.md,
     },
     cover: {
-      width: 112, height: 70, borderRadius: t.radius.sm,
+      width: 112,
+      height: 70,
+      borderRadius: t.radius.sm,
       backgroundColor: t.colors.surfaceHigh,
     },
     info: { flex: 1, marginLeft: t.spacing.md, justifyContent: 'space-between' },
@@ -199,19 +233,46 @@ export const VideosScreen = ({ route, navigation }: any) => {
     },
   });
 
+  const cycleSort = () => {
+    const next = sortOption === 'default' ? 'title' : sortOption === 'title' ? 'duration' : 'default';
+    setSortOption(next);
+    if (Platform.OS === 'android') {
+      const label = next === 'default' ? '默认' : next === 'title' ? '标题' : '时长';
+      ToastAndroid.show(`排序方式：${label}`, ToastAndroid.SHORT);
+    } else {
+      const label = next === 'default' ? '默认' : next === 'title' ? '标题' : '时长';
+      Alert.alert('提示', `排序方式：${label}`);
+    }
+  };
+
   return (
     <SafeAreaView style={[s.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title={`${title} (${list.length})`} showBack />
+      {/* 搜索 + 排序栏 */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
+        <View style={s.searchBar}>
+          <Icon name="magnify" size={20} color={t.colors.textHint} />
+          <TextInput
+            style={{ flex: 1, marginLeft: t.spacing.sm, color: t.colors.text, fontSize: t.fontSize.base, padding: 0 }}
+            placeholder="搜索视频"
+            placeholderTextColor={t.colors.textHint}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+        <IconButton name="sort-variant" size={24} color={t.colors.text} style={{ marginLeft: t.spacing.sm }} onPress={cycleSort} />
+      </View>
+
       {initing ? (
         <Loading />
-      ) : error && list.length === 0 ? (
+      ) : error && displayedList.length === 0 ? (
         <ErrorView message={error} onRetry={loadMore} />
-      ) : list.length === 0 ? (
+      ) : displayedList.length === 0 ? (
         <Empty title="收藏夹是空的" />
       ) : (
         <FlatList
-          data={list}
+          data={displayedList}
           keyExtractor={(it) => it.bvid}
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={
