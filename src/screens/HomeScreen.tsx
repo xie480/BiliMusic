@@ -59,8 +59,8 @@ export const HomeScreen = ({ navigation }: any) => {
         <Icon name="music" size={44} color={t.colors.primary} />
       </View>
       <Text style={s.title}>BiliMusic</Text>
-      <Text style={s.subtitle}>你所热爱的，就是你的生活</Text>
-      <Button title="登录 B 站" onPress={onLogin} style={s.enter} />
+      <Text style={s.subtitle}>听见的，不只是声音</Text>
+      <Button title="立即登录" onPress={onLogin} style={s.enter} />
       <Text
         style={[s.settingsBtnText, s.settingsBtn]}
         onPress={() => navigation.navigate('Settings')}

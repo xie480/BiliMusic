@@ -140,26 +140,63 @@ async function lazyResolve(index: number) {
     const t = queue[index];
     if (!t || !String(t.url).startsWith('placeholder://')) return;
     
-    bvid = String(t.url).replace('placeholder://', '');
+    const rawId = String(t.url).replace('placeholder://', '');
+    const [extractedBvid, cidStr] = rawId.split('-');
+    bvid = extractedBvid;
+    const cid = cidStr ? parseInt(cidStr, 10) : undefined;
     // 记录轨道开始加载时间
     performanceMonitor.start(bvid);
     const quality = useSettingsStore.getState().quality;
+    const cacheKey = cid ? `${bvid}-${cid}` : bvid;
     
     let url: string;
     let headers: Record<string, string> | undefined;
+    let resolvedInfo: any = undefined;
     
-    const cachedPath = await audioCache.has(bvid, quality);
+    const cachedPath = await audioCache.has(cacheKey, quality);
     if (cachedPath) {
       url = `file://${cachedPath}`;
     } else {
-      const info = await audioService.getInfo(bvid, quality);
-      const downloadedPath = await audioCache.download(bvid, quality, info.audio.baseUrl, {
+      resolvedInfo = await audioService.getInfo(bvid, quality, cid);
+      const downloadedPath = await audioCache.download(cacheKey, quality, resolvedInfo.audio.baseUrl, {
         Referer: config.referer,
         'User-Agent': config.userAgent,
       });
       url = `file://${downloadedPath}`;
       // 触发后台自动下载（如在 Wi‑Fi 环境下）保持已有逻辑
-      autoCache(bvid).catch(() => {});
+      autoCache(bvid, cid).catch(() => {});
+    }
+
+    // 多P视频动态队列展开：仅在根占位符（未指定cid）时执行
+    let videoInfo: any;
+    if (!cid) {
+      videoInfo = resolvedInfo || await audioService.getInfo(bvid, quality);
+      const parts = videoInfo?.parts;
+      if (parts && parts.length > 1) {
+        usePlayerStore.getState().updateVideoParts(bvid, parts);
+        usePlayerStore.getState().setCurrentCid(parts[0].cid);
+        // 获取当前队列快照，找到根占位符的位置
+        const expandQueue = await TrackPlayer.getQueue();
+        const currentIdx = expandQueue.findIndex(
+          tr => tr.id === bvid && String(tr.url).startsWith('placeholder://')
+        );
+        if (currentIdx !== -1) {
+          // 将第2P及之后的分P作为占位符插入到当前轨道之后（倒序插入保持顺序）
+          const remainingParts = parts.slice(1);
+          for (let i = remainingParts.length - 1; i >= 0; i--) {
+            const part = remainingParts[i];
+            await TrackPlayer.add({
+              id: bvid,
+              url: `placeholder://${bvid}-${part.cid}`,
+              title: `${videoInfo.title} - ${part.title}`,
+              artist: videoInfo.author,
+              artwork: videoInfo.cover,
+              duration: part.duration,
+              cid: part.cid,
+            }, currentIdx + 1);
+          }
+        }
+      }
     }
 
     // 动态查找当前 placeholder 的实际索引，防止队列变化导致 index 失效
@@ -169,7 +206,12 @@ async function lazyResolve(index: number) {
       return; // 找不到对应的 placeholder，可能已被用户操作移出队列或已解析
     }
 
-    const newTrack = { ...t, url, userAgent: config.userAgent, headers };
+    // 如果是多P视频的根占位符，替换为第一P的标题
+    let title = t.title;
+    if (!cid && videoInfo?.parts && videoInfo.parts.length > 0) {
+      title = `${videoInfo.title} - ${videoInfo.parts[0].title}`;
+    }
+    const newTrack: any = { ...t, url, title, userAgent: config.userAgent, headers, cid };
     // 平滑替换策略：先在 actualIndex 后面插入新 track，跳过去，再删掉原来的 placeholder
     await TrackPlayer.add(newTrack, actualIndex + 1);
     const postAddActiveTrackIndex = await TrackPlayer.getActiveTrackIndex();
@@ -203,13 +245,14 @@ async function lazyResolve(index: number) {
   }
 }
 
-async function autoCache(bvid: string) {
+async function autoCache(bvid: string, cid?: number) {
   const s = useSettingsStore.getState();
   if (!s.autoCacheOnWifi || !netStatus.isWifi()) return;
-  if (await audioCache.has(bvid, s.quality)) return;
+  const cacheKey = cid ? `${bvid}-${cid}` : bvid;
+  if (await audioCache.has(cacheKey, s.quality)) return;
   try {
-    const info = await audioService.getInfo(bvid, s.quality);
-    await audioCache.download(bvid, s.quality, info.audio.baseUrl, {
+    const info = await audioService.getInfo(bvid, s.quality, cid);
+    await audioCache.download(cacheKey, s.quality, info.audio.baseUrl, {
       Referer: config.referer, 'User-Agent': config.userAgent,
     });
   } catch {}
@@ -245,6 +288,20 @@ export async function PlaybackService() {
     const activeTrack = await TrackPlayer.getActiveTrack();
     if (activeTrack?.id) {
       performanceMonitor.start(activeTrack.id as string);
+      // 提取当前播放轨道的 cid，更新到 store
+      if (activeTrack.url && typeof activeTrack.url === 'string') {
+        const urlStr = activeTrack.url;
+        if (urlStr.startsWith('placeholder://')) {
+          const rawId = urlStr.replace('placeholder://', '');
+          const parts = rawId.split('-');
+          if (parts.length >= 2) {
+            const cid = parseInt(parts[1], 10);
+            if (!isNaN(cid)) {
+              usePlayerStore.getState().setCurrentCid(cid);
+            }
+          }
+        }
+      }
     }
     if (e.index !== undefined) {
       await lazyResolve(e.index);
@@ -286,4 +343,46 @@ export async function PlaybackService() {
     
     await TrackPlayer.skipToNext().catch(() => {});
   });
+}
+
+/**
+ * 在播放列表中直接点击特定分P时，将其作为占位符插入队列并跳转播放
+ */
+export async function playSpecificPart(bvid: string, cid: number, partTitle: string) {
+  // 检查队列中是否已存在该分P
+  const currentQueue = await TrackPlayer.getQueue();
+  const placeholderUrl = `placeholder://${bvid}-${cid}`;
+  const existingIndex = currentQueue.findIndex(t => t.url === placeholderUrl);
+  
+  if (existingIndex !== -1) {
+    // 直接跳转到已存在的轨道
+    await TrackPlayer.skip(existingIndex);
+    await TrackPlayer.play();
+    usePlayerStore.getState().setCurrentCid(cid);
+    return;
+  }
+  
+  const rawIdx = await TrackPlayer.getActiveTrackIndex();
+  const idx = typeof rawIdx === 'number' ? rawIdx : -1;
+  const insertPos = idx >= 0 ? idx + 1 : 0;
+  
+  // 获取视频信息以构建 track
+  const quality = useSettingsStore.getState().quality;
+  const info = await audioService.getInfo(bvid, quality, cid);
+  
+  await TrackPlayer.add({
+    id: bvid,
+    url: placeholderUrl,
+    title: `${info.title} - ${partTitle}`,
+    artist: info.author,
+    artwork: info.cover,
+    duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
+  }, insertPos);
+  
+  // 跳转到新插入的轨道
+  await TrackPlayer.skip(insertPos);
+  await TrackPlayer.play();
+  
+  // 更新 store
+  usePlayerStore.getState().setCurrentCid(cid);
 }

@@ -141,7 +141,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             <Text style={s.saveText} onPress={handleLogout}>退出登录</Text>
           </View>
         ) : (
-          <Text style={s.saveText} onPress={triggerLogin}>登录 B 站</Text>
+          <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
         )}
       </View>
         <Text style={s.section}>音质</Text>
@@ -233,7 +233,7 @@ export const SettingsScreen = ({ navigation }: any) => {
             title="已缓存音频"
             right={
               <Text style={{ color: t.colors.textSub, fontSize: t.fontSize.sm }}>
-                {cacheCount} / {formatBytes(cacheSize)}
+                {cacheCount}首 / {formatBytes(cacheSize)}
               </Text>
             }
           />

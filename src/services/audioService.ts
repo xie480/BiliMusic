@@ -75,63 +75,73 @@ export const audioService = {
    * 1. videoInfo 缓存 1 天（标题等基本不变）
    * 2. audioUrl 缓存 1 小时（B 站 URL 约 2 小时失效）
    */
-  async getInfo(bvid: string, quality: Quality = 'low'): Promise<AudioInfo> {
-    if (!QUALITY_MAP[quality]) {
-      throw new Error(`无效的音质参数: ${quality}`);
-    }
-
-    return cache.getOrSet(
-      `audioInfo:${bvid}:${quality}`,
-      config.cacheTTL.audioUrl,
-      async () => {
-        // videoInfo 单独缓存，与 quality 无关
-        const info = await cache.getOrSet(
-          `videoInfo:${bvid}`,
-          config.cacheTTL.videoInfo,
-          () => biliApi.getVideoInfo(bvid),
-          true
-        );
-
-        const playUrl = await biliApi.getPlayUrl(bvid, info.cid);
-        
-        let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
-        
-        // 如果没有 dash 音频流，尝试回退到 durl（MP4 混合流）
-        if (audios.length === 0 && playUrl.durl && playUrl.durl.length > 0) {
-          audios = playUrl.durl.map(d => ({
-            id: 30216, // 默认给个低音质 ID
-            bandwidth: 0,
-            mimeType: 'audio/mp4',
-            baseUrl: d.url,
-            backupUrl: d.backup_url || [],
-          }));
-        }
-
-        if (audios.length === 0) {
-          throw new ResourceUnavailableError('该视频无可用音频流');
-        }
-        const audio = pickAudio(audios, quality);
-
-        return {
-          bvid,
-          cid: info.cid,
-          title: info.title,
-          cover: info.pic,
-          author: info.owner?.name || '',
-          duration: info.duration,
-          audio: {
-            id: audio.id,
-            bitrate: Math.round((audio.bandwidth || 0) / 1000),
-            mimeType: audio.mimeType,
-            // 使用最快的 CDN URL
-            baseUrl: await selectFastestUrl(bvid, audio.baseUrl, audio.backupUrl),
-            backupUrl: audio.backupUrl,
-          },
-        };
-      },
-      false // 仅内存缓存，不持久化（URL 有时效）
-    );
-  },
+  async getInfo(bvid: string, quality: Quality = 'low', cid?: number): Promise<AudioInfo> {
+      if (!QUALITY_MAP[quality]) {
+        throw new Error(`无效的音质参数: ${quality}`);
+      }
+  
+      const cacheKey = `audioInfo:${bvid}:${cid ?? 'default'}:${quality}`;
+      return cache.getOrSet(
+        cacheKey,
+        config.cacheTTL.audioUrl,
+        async () => {
+          // videoInfo 单独缓存，与 quality 无关
+          const info = await cache.getOrSet(
+            `videoInfo:${bvid}`,
+            config.cacheTTL.videoInfo,
+            () => biliApi.getVideoInfo(bvid),
+            true
+          );
+  
+          const targetCid = cid ?? info.cid;
+          const playUrl = await biliApi.getPlayUrl(bvid, targetCid);
+          
+          let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
+          
+          // 如果没有 dash 音频流，尝试回退到 durl（MP4 混合流）
+          if (audios.length === 0 && playUrl.durl && playUrl.durl.length > 0) {
+            audios = playUrl.durl.map(d => ({
+              id: 30216, // 默认给个低音质 ID
+              bandwidth: 0,
+              mimeType: 'audio/mp4',
+              baseUrl: d.url,
+              backupUrl: d.backup_url || [],
+            }));
+          }
+  
+          if (audios.length === 0) {
+            throw new ResourceUnavailableError('该视频无可用音频流');
+          }
+          const audio = pickAudio(audios, quality);
+  
+          // 构建分P信息（如果有的话）
+          const parts = (info as any).pages?.map(p => ({
+            cid: p.cid,
+            page: p.page,
+            title: p.part,
+            duration: p.duration,
+          })) ?? [];
+  
+          return {
+            bvid,
+            cid: targetCid,
+            title: info.title,
+            cover: info.pic,
+            author: info.owner?.name || '',
+            duration: info.duration,
+            audio: {
+              id: audio.id,
+              bitrate: Math.round((audio.bandwidth || 0) / 1000),
+              mimeType: audio.mimeType,
+              baseUrl: await selectFastestUrl(bvid, audio.baseUrl, audio.backupUrl),
+              backupUrl: audio.backupUrl,
+            },
+            parts,
+          };
+        },
+        false // 仅内存缓存，不持久化（URL 有时效）
+      );
+    },
 
   /** 强制刷新某 BV 的所有音质缓存（URL 失效时） */
   invalidate(bvid: string) {

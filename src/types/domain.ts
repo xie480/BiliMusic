@@ -9,6 +9,14 @@ export interface FavoriteFolder {
   mediaCount: number;
 }
 
+/** 视频分段（P）信息 */
+export interface VideoPart {
+  cid: number;
+  page: number;
+  title: string;
+  duration: number;
+}
+
 /** 收藏夹中的视频条目（精简后）*/
 export interface FavoriteVideo {
   bvid: string;
@@ -20,6 +28,8 @@ export interface FavoriteVideo {
   upper: { mid: number; name: string };
   attr: number;
   folderIds?: number[];
+  /** 分P 列表，仅在获取到视频详情后填充 */
+  parts?: VideoPart[];
 }
 
 /** 音频流信息 */
@@ -37,6 +47,8 @@ export interface AudioInfo {
     baseUrl: string;        // 真实 CDN 地址
     backupUrl: string[];    // 备用 CDN
   };
+  /** 视频分段信息，仅在获取到详情后填充 */
+  parts?: VideoPart[];
 }
 
 /** 分页结果 */

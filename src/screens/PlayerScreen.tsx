@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, StatusBar } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, {
   useActiveTrack, usePlaybackState, useProgress, State,
@@ -14,6 +14,8 @@ import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
 import { netStatus } from '../services/netStatus';
+import { usePlayerStore } from '../store/playerStore';
+import { playSpecificPart } from '../services/trackPlayer';
 
 export const PlayerScreen = () => {
   const t = useTheme();
@@ -24,6 +26,9 @@ export const PlayerScreen = () => {
   const progress = useProgress();
   const quality = useSettingsStore((s) => s.quality);
   // const playlistVisible = useUIStore(state => state.playlistVisible); // removed, handled globally
+  const queue = usePlayerStore((s) => s.queue);
+  const currentCid = usePlayerStore((s) => s.currentCid);
+  const [isPartsExpanded, setIsPartsExpanded] = useState(false);
 
   const isPlaying = playback.state === State.Playing;
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
@@ -36,6 +41,10 @@ export const PlayerScreen = () => {
     );
   }
 
+  const currentVideo = queue.find((v) => v.bvid === track.id);
+  const hasMultiParts = currentVideo?.parts && currentVideo.parts.length > 1;
+  const currentPart = currentVideo?.parts?.find((p) => p.cid === currentCid);
+
   const isLocal = String(track.url || '').startsWith('file://');
   const qualityText = { low: '64K', medium: '132K', high: '192K' }[quality];
   const sourceText = isLocal ? '本地缓存' : netStatus.type === 'wifi' ? 'WiFi' : '移动数据';
@@ -46,7 +55,7 @@ export const PlayerScreen = () => {
       height: 48, flexDirection: 'row', alignItems: 'center',
       paddingHorizontal: t.spacing.sm, justifyContent: 'space-between',
     },
-    body: { flex: 1, alignItems: 'center', paddingHorizontal: t.spacing.xl },
+    body: { flex: 1 },
     cover: {
       width: 280, height: 280, borderRadius: t.radius.xl,
       marginTop: t.spacing.xl,
@@ -82,6 +91,58 @@ export const PlayerScreen = () => {
       flexDirection: 'row', alignItems: 'center', gap: 4,
     },
     statusText: { fontSize: t.fontSize.xs, color: t.colors.textHint },
+    partsContainer: {
+      alignSelf: 'stretch',
+      marginTop: t.spacing.md,
+    },
+    partsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: t.spacing.md,
+      paddingVertical: t.spacing.sm,
+      backgroundColor: t.colors.surface,
+      borderRadius: t.radius.md,
+    },
+    partsHeaderText: {
+      fontSize: t.fontSize.base,
+      color: t.colors.text,
+      fontWeight: '500',
+    },
+    partsList: {
+      maxHeight: 250,
+      marginTop: 4,
+      borderRadius: t.radius.md,
+      backgroundColor: t.colors.surface,
+    },
+    partItem: {
+      paddingHorizontal: t.spacing.md,
+      paddingVertical: t.spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.colors.textHint,
+    },
+    partItemActive: {
+      backgroundColor: t.colors.primary + '20',
+    },
+    partItemContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    partItemText: {
+      fontSize: t.fontSize.sm,
+      color: t.colors.text,
+      flex: 1,
+      marginRight: 8,
+    },
+    partItemTextActive: {
+      color: t.colors.primary,
+      fontWeight: '600',
+    },
+    playingIndicator: {
+      fontSize: t.fontSize.xs,
+      color: t.colors.primary,
+    },
   });
 
   const onSeekEnd = (p: number) => {
@@ -97,7 +158,7 @@ export const PlayerScreen = () => {
           onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
       </View>
 
-      <View style={s.body}>
+      <ScrollView style={s.body} contentContainerStyle={{ alignItems: 'center', paddingHorizontal: t.spacing.xl }} showsVerticalScrollIndicator={false}>
         <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
         <Text style={s.title} numberOfLines={2}>{track.title}</Text>
         <Text style={s.artist} numberOfLines={1}>{track.artist}</Text>
@@ -129,7 +190,59 @@ export const PlayerScreen = () => {
         {isBuffering && (
           <Text style={[s.time, { marginTop: 8 }]}>缓冲中...</Text>
         )}
-      </View>
+        {hasMultiParts && currentVideo && (
+          <View style={s.partsContainer}>
+            <TouchableOpacity
+              style={s.partsHeader}
+              onPress={() => setIsPartsExpanded(!isPartsExpanded)}
+              activeOpacity={0.7}
+            >
+              <Text style={s.partsHeaderText} numberOfLines={1}>
+                {currentPart ? `P${(currentVideo.parts!.findIndex(p => p.cid === currentCid) + 1)}/${currentVideo.parts!.length} ${currentPart.title}` : `选集 (${currentVideo.parts!.length})`}
+              </Text>
+              <IconButton
+                name={isPartsExpanded ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={t.colors.textSub}
+              />
+            </TouchableOpacity>
+            {isPartsExpanded && (
+              <ScrollView
+                style={s.partsList}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled={true}
+              >
+                {currentVideo.parts!.map((part) => {
+                  const isActive = part.cid === currentCid;
+                  return (
+                    <TouchableOpacity
+                      key={part.cid}
+                      style={[s.partItem, isActive && s.partItemActive]}
+                      onPress={() => {
+                        playSpecificPart(currentVideo.bvid, part.cid, part.title);
+                        setIsPartsExpanded(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={s.partItemContent}>
+                        <Text
+                          style={[s.partItemText, isActive && s.partItemTextActive]}
+                          numberOfLines={1}
+                        >
+                          {part.title}
+                        </Text>
+                        {isActive && (
+                          <Text style={s.playingIndicator}>▶</Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        )}
+      </ScrollView>
 
       <View style={s.statusBar}>
         <View style={s.statusItem}>

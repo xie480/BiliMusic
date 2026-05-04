@@ -24,6 +24,17 @@ export interface BiliFavoriteVideoMedia {
   upper: { mid: number; name: string };
 }
 
+/** 视频分段（P）信息，匹配 B 站 API 中的 pages 条目 */
+export interface BiliVideoPage {
+  cid: number;
+  page: number;
+  part: string; // 分段标题
+  duration: number;
+  vid?: string;
+  weblink?: string;
+  dimension?: { width: number; height: number; rotate: number };
+}
+
 export interface BiliVideoInfo {
   bvid: string;
   cid: number;
@@ -31,6 +42,8 @@ export interface BiliVideoInfo {
   pic: string;
   duration: number;
   owner: { mid: number; name: string };
+  /** 视频分段（P）列表，可能为空 */
+  pages?: BiliVideoPage[];
 }
 
 export interface BiliDashAudio {

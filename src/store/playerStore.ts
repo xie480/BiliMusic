@@ -18,15 +18,21 @@ interface PlayerState {
   playbackError: string | null;
   playMode: 'sequential' | 'shuffle';
   originalQueue: FavoriteVideo[];
+  /** 当前正在播放的分P的 cid，null 表示未解析或单P视频 */
+  currentCid: number | null;
   setQueue: (q: FavoriteVideo[], bvid?: string) => void;
   setCurrentBvid: (bvid: string | null) => void;
   setPlaybackError: (msg: string | null) => void;
   setPlayMode: (mode: 'sequential' | 'shuffle') => void;
+  /** 更新当前 cid */
+  setCurrentCid: (cid: number | null) => void;
   togglePlayMode: () => void;
   insertNext: (video: FavoriteVideo) => Promise<void>;
   removeFromQueue: (bvid: string) => Promise<void>;
   reorderQueue: (videos: FavoriteVideo[], startBvid?: string) => Promise<void>;
   appendQueue: (videos: FavoriteVideo[], startBvid?: string) => Promise<void>;
+  /** 在队列中更新特定视频的 parts 信息 */
+  updateVideoParts: (bvid: string, parts: any[]) => void;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -34,12 +40,18 @@ export const usePlayerStore = create<PlayerState>()(
     (set) => ({
       queue: [],
       currentBvid: null,
+      currentCid: null,
       playbackError: null,
       playMode: 'sequential',
       originalQueue: [],
       setQueue: (queue, bvid) =>
-        set({ queue, currentBvid: bvid ?? queue[0]?.bvid ?? null, originalQueue: queue }),
+        set({ queue, currentBvid: bvid ?? queue[0]?.bvid ?? null, originalQueue: queue, currentCid: null }),
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
+      setCurrentCid: (cid) => set({ currentCid: cid }),
+      updateVideoParts: (bvid, parts) => set(state => ({
+        queue: state.queue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),
+        originalQueue: state.originalQueue.map(v => (v.bvid === bvid ? { ...v, parts } : v))
+      })),
       setPlaybackError: (msg) => set({ playbackError: msg }),
       setPlayMode: (mode) => set({ playMode: mode }),
       togglePlayMode: () => set(state => {
