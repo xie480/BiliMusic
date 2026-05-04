@@ -53,10 +53,14 @@ export class AdaptiveRateLimiter {
     }, waitMs);
   }
 
+  private get capacity() {
+    return Math.max(1, this.currentRate);
+  }
+
   private refill() {
     const now = Date.now();
     const delta = (now - this.lastRefill) / 1000;
-    this.tokens = Math.min(this.currentRate, this.tokens + delta * this.currentRate);
+    this.tokens = Math.min(this.capacity, this.tokens + delta * this.currentRate);
     this.lastRefill = now;
     // 尝试唤醒等待队列中的请求
     this.tryWake();
@@ -81,7 +85,7 @@ export class AdaptiveRateLimiter {
   reportError(isRateLimit: boolean) {
     if (isRateLimit) {
       this.currentRate = Math.max(this.minRate, this.currentRate * 0.5); // 乘减
-      this.tokens = Math.min(this.tokens, this.currentRate);
+      this.tokens = Math.min(this.tokens, this.capacity);
       this.successCount = 0;
     }
   }

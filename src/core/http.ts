@@ -74,9 +74,9 @@ export async function biliGet<T>(
     // 合并用户传入的 signal（若有）和内部的 abortController.signal
     const combinedSignal = options.signal ?? abortController.signal;
     // 若用户提供了 signal，我们在其 abort 时同步 abort 内部的 controller
+    const onAbort = () => abortController.abort();
     if (options.signal) {
       // AbortSignal 在较新的 TS 类型中 addEventListener 可能标记为可选，使用 onabort 作为兼容方案
-      const onAbort = () => abortController.abort();
       if (typeof options.signal.addEventListener === 'function') {
         options.signal.addEventListener('abort', onAbort);
       } else {
@@ -108,6 +108,16 @@ export async function biliGet<T>(
       if (attempt < retries) {
         let delay = config.retry.delayMs * (attempt + 1);
         await new Promise((r) => setTimeout(r, delay));
+      }
+    } finally {
+      if (options.signal) {
+        if (typeof options.signal.removeEventListener === 'function') {
+          options.signal.removeEventListener('abort', onAbort);
+        } else {
+          if ((options.signal as any).onabort === onAbort) {
+            (options.signal as any).onabort = null;
+          }
+        }
       }
     }
   }
