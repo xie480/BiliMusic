@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, {
   useActiveTrack, usePlaybackState, useProgress, State,
@@ -9,6 +10,7 @@ import { IconButton } from './IconButton';
 import { GlassView } from './GlassView';
 import { useTheme } from '../theme';
 import { useUIStore } from '../store/uiStore';
+import { usePlayerStore } from '../store/playerStore';
 
 export const MiniPlayer: React.FC = () => {
   const t = useTheme();
@@ -17,9 +19,11 @@ export const MiniPlayer: React.FC = () => {
   const progress = useProgress();
   const nav = useNavigation<any>();
   const isGlass = !!t.glass;
+  const isResolving = usePlayerStore((s) => s.isResolving);
 
   if (!track) return null;
   const isPlaying = playback.state === State.Playing;
+  const isBufferingOrResolving = playback.state === State.Buffering || playback.state === State.Loading || isResolving;
   const p = progress.duration > 0 ? progress.position / progress.duration : 0;
 
   const s = StyleSheet.create({
@@ -51,7 +55,15 @@ export const MiniPlayer: React.FC = () => {
   const innerContent = (
     <View>
       <View style={s.progress}>
-        <View style={[s.progressFill, { width: `${p * 100}%` }]} />
+        {isGlass && t.glass && t.glass.colors.progress.fill ? (
+          <LinearGradient
+            colors={t.glass.colors.progress.fill}
+            start={{x:0,y:0}} end={{x:1,y:0}}
+            style={[s.progressFill, { width: `${p * 100}%` }]}
+          />
+        ) : (
+          <View style={[s.progressFill, { width: `${p * 100}%` }]} />
+        )}
       </View>
       <View style={s.row}>
         <TouchableOpacity onPress={() => nav.navigate('Player')} activeOpacity={0.7}>
@@ -66,12 +78,16 @@ export const MiniPlayer: React.FC = () => {
           <Text style={s.artist} numberOfLines={1}>{track.artist}</Text>
         </TouchableOpacity>
         <View style={s.actions}>
-          <IconButton
-            name={isPlaying ? 'pause' : 'play'}
-            size={26}
-            color={t.colors.text}
-            onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
-          />
+          {isBufferingOrResolving ? (
+            <ActivityIndicator size="small" color={t.colors.primary} style={{ marginRight: 12 }} />
+          ) : (
+            <IconButton
+              name={isPlaying ? 'pause' : 'play'}
+              size={26}
+              color={t.colors.text}
+              onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
+            />
+          )}
           <IconButton name="skip-next" size={26} color={t.colors.text}
                       onPress={() => TrackPlayer.skipToNext()} />
           <IconButton name="playlist-music" size={24} color={t.colors.text}

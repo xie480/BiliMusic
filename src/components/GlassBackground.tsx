@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Image,
@@ -38,8 +38,12 @@ export const GlassBackground: React.FC = () => {
   const setGlassTransitionComplete = useUIStore((s) => s.setGlassTransitionComplete);
   const insets = useSafeAreaInsets();
 
-  const hasCustomBg = !!customBackgroundImage;
   const isGlass = !!glass;
+
+  // Anti-flicker mechanism: immediately clear active background state when not in glass mode
+  // customBackgroundImage remains persisted in settingsStore
+  const activeBg = isGlass ? customBackgroundImage : null;
+  const hasCustomBg = !!activeBg;
 
   // ── Opacity animation for the enhanced overlay ────────────────────────
   const overlayAnim = useRef(new Animated.Value(isGlass ? 1 : 0)).current;
@@ -75,24 +79,18 @@ export const GlassBackground: React.FC = () => {
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
       {hasCustomBg ? (
         <Image
-          source={{ uri: customBackgroundImage! }}
+          source={{ uri: activeBg! }}
           style={StyleSheet.absoluteFillObject}
           resizeMode="cover"
           blurRadius={effectiveBlur}
         />
       ) : isGlass ? (
-        <View style={StyleSheet.absoluteFillObject}>
-          <LinearGradient
-            colors={
-              Array.isArray(glass!.colors.pageBg)
-                ? glass!.colors.pageBg
-                : [glass!.colors.pageBg, glass!.colors.pageBg]
-            }
-            style={StyleSheet.absoluteFillObject}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-        </View>
+        <Image
+          source={isDark ? require('../../resource/dark.jpg') : require('../../resource/light.jpg')}
+          style={StyleSheet.absoluteFillObject}
+          resizeMode="cover"
+          blurRadius={effectiveBlur}
+        />
       ) : null}
     </View>
   );
@@ -102,21 +100,14 @@ export const GlassBackground: React.FC = () => {
     <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
       <LinearGradient
         colors={
-          hasCustomBg
-            ? ['transparent', 'transparent']
-            : isDark
-              ? ['#0F0F11', '#0F0F11']
-              : ['#FFFFFF', '#FFFFFF']
+          isDark
+            ? ['#0F0F11', '#0F0F11']
+            : ['#FFFFFF', '#FFFFFF']
         }
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       />
-      {hasCustomBg && (
-        <View
-          style={[StyleSheet.absoluteFillObject, { backgroundColor: strongMask }]}
-        />
-      )}
     </View>
   ) : null;
 

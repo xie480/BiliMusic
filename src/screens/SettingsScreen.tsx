@@ -140,10 +140,10 @@ export const SettingsScreen = ({ navigation }: any) => {
   }, [setCustomBackgroundImage]);
 
   const handleClearBackground = useCallback(() => {
-    Alert.alert('清除背景图', '确定要恢复默认背景吗？', [
+    Alert.alert('重置背景图', '确定要恢复默认背景吗？', [
       { text: '取消' },
       {
-        text: '清除', style: 'destructive',
+        text: '重置', style: 'destructive',
         onPress: () => setCustomBackgroundImage(null),
       },
     ]);
@@ -227,7 +227,7 @@ export const SettingsScreen = ({ navigation }: any) => {
                 onPress={handlePickBackground}
                 right={
                   customBackgroundImage ? (
-                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }} onPress={handleClearBackground}>清除</Text>
+                    <Text style={{ color: t.colors.primary, fontSize: t.fontSize.sm }} onPress={handleClearBackground}>重置</Text>
                   ) : (
                     <Text style={{ color: t.colors.primary, fontSize: 18 }}>+</Text>
                   )

@@ -57,13 +57,6 @@ export const Header: React.FC<Props> = ({ title, showBack, left, right, noBorder
     </View>
   );
 
-  if (isGlass) {
-    return (
-      <GlassView style={s.outer} borderRadius={0} noShadow>
-        {inner}
-      </GlassView>
-    );
-  }
-
-  return <View style={[s.outer, { backgroundColor: t.colors.background }]}>{inner}</View>;
+  const bgColor = t.isDark ? '#0F0F11' : '#FFFFFF';
+  return <View style={[s.outer, { backgroundColor: bgColor }]}>{inner}</View>;
 };

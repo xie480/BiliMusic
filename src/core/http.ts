@@ -121,7 +121,12 @@ export async function biliGet<T>(
         throw err;
       }
       if (err instanceof RateLimitError) {
-        throw err; // 限流错误不在底层重试，交给上层指数退避处理
+        if (attempt < retries) {
+          const delay = Math.min(config.retry.delayMs * Math.pow(2, attempt), 30000);
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          throw err;
+        }
       }
       if (attempt < retries) {
         let delay = config.retry.delayMs * (attempt + 1);

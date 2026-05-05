@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, PanResponder, StyleSheet, LayoutChangeEvent } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import { useTheme } from '../theme';
 
 interface Props {
@@ -71,7 +72,15 @@ export const ProgressBar: React.FC<Props> = ({ progress, onSeekStart, onSeekEnd 
       style={s.container}
     >
       <View style={s.bar}>
-        <View style={[s.fill, { width: `${p * 100}%` }]} />
+        {t.glass && t.glass.colors.progress.fill ? (
+          <LinearGradient
+            colors={t.glass.colors.progress.fill}
+            start={{x:0,y:0}} end={{x:1,y:0}}
+            style={[s.fill, { width: `${p * 100}%` }]}
+          />
+        ) : (
+          <View style={[s.fill, { width: `${p * 100}%` }]} />
+        )}
         {seeking && (
           <View style={[s.thumb, { left: `${p * 100}%`, marginLeft: -6.5 }]} />
         )}

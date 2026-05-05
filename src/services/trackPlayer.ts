@@ -209,7 +209,13 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
   if (resolving.has(index)) return;
   resolving.add(index);
   let bvid = '';
+  let isActiveTrack = false;
   try {
+    const activeIdx = await TrackPlayer.getActiveTrackIndex();
+    if (activeIdx === index) {
+      isActiveTrack = true;
+      usePlayerStore.getState().setResolving(true);
+    }
     const queue = await TrackPlayer.getQueue();
     const t = queue[index];
     if (!t || !String(t.url).startsWith('placeholder://')) return;
@@ -322,6 +328,9 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       await TrackPlayer.skipToNext().catch(() => {});
     }
   } finally {
+    if (isActiveTrack) {
+      usePlayerStore.getState().setResolving(false);
+    }
     resolving.delete(index);
   }
 }

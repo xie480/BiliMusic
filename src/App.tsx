@@ -16,6 +16,7 @@ import { VideosScreen } from './screens/VideosScreen';
 import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
+import { SplashScreen } from './screens/SplashScreen';
 import { favoriteService } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
@@ -44,16 +45,20 @@ const VideosScreenWithBg = withBackground(VideosScreen);
 const PlayerScreenWithBg = withBackground(PlayerScreen);
 const SettingsScreenWithBg = withBackground(SettingsScreen);
 const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
+const SplashScreenWithBg = withBackground(SplashScreen);
 
 export default function App() {
-  const isDark = useColorScheme() === 'dark';
+  const systemScheme = useColorScheme();
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const isDark = themeMode === 'system' ? systemScheme === 'dark' : (themeMode === 'dark' || themeMode === 'glass-dark');
+  const baseBgColor = isDark ? '#0F0F11' : '#FFFFFF';
+  
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
   const { loggedIn, userId: uid, initAuth } = useAuthStore();
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
-  const themeMode = useSettingsStore((s) => s.themeMode);
   const isGlassMode = themeMode === 'glass-light' || themeMode === 'glass-dark';
   const navTheme = {
     ...(isDark ? DarkTheme : DefaultTheme),
@@ -150,17 +155,18 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: baseBgColor }}>
             <GlassBackground />
             <NavigationContainer ref={navigationRef} theme={navTheme}>
               <Stack.Navigator
-                initialRouteName={loggedIn ? 'Folders' : 'Home'}
+                initialRouteName="Splash"
                 screenOptions={{
                   headerShown: false,
                   cardStyle: { backgroundColor: 'transparent' },
                   animation: isGlassMode ? 'none' : 'default'
                 }}
               >
+                <Stack.Screen name="Splash" component={SplashScreenWithBg} />
                 <Stack.Screen name="Home" component={HomeScreenWithBg} />
                 <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
                 <Stack.Screen name="Videos" component={VideosScreenWithBg} />

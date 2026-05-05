@@ -16,6 +16,8 @@ type AuthState = {
   userId: string | null;
   /** 当前用户信息 */
   userInfo: UserInfo | null;
+  /** 认证状态是否已初始化完成 */
+  authReady: boolean;
   /** 登录成功后调用，设置状态并可传入 UID */
   login: (uid?: string) => Promise<void>;
   /** 登出，清除本地 Cookie 并重置状态 */
@@ -28,12 +30,15 @@ type AuthState = {
   setUserInfo: (info: UserInfo) => void;
   /** 初始化认证状态，应用启动时调用 */
   initAuth: () => Promise<void>;
+  /** 设置认证就绪状态 */
+  setAuthReady: (ready: boolean) => void;
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   loggedIn: false,
   userId: null,
   userInfo: null,
+  authReady: false,
   initAuth: async () => {
     const cookie = await cookieService.get();
     if (cookie) {
@@ -47,7 +52,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } else {
       set({ loggedIn: false, userId: null, userInfo: null });
     }
+    set({ authReady: true });
   },
+  setAuthReady: (ready) => set({ authReady: ready }),
   login: async (uid) => {
     set({ loggedIn: true, userId: uid ?? null });
     try {

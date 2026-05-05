@@ -231,7 +231,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title={`${title}`} showBack />
       {/* 搜索 + 排序栏 */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: t.spacing.lg, paddingVertical: t.spacing.md}}>
         <View style={[s.searchBar, { flex: 1 }]}>
           <Icon name="magnify" size={20} color={t.colors.textHint} />
           <TextInput

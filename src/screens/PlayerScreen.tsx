@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, {
   useActiveTrack, usePlaybackState, useProgress, State,
@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useUIStore } from '../store/uiStore';
 // import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
 import { ProgressBar } from '../components/ProgressBar';
+import { MarqueeText } from '../components/MarqueeText';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSettingsStore } from '../store/settingsStore';
@@ -29,6 +30,7 @@ export const PlayerScreen = () => {
   // const playlistVisible = useUIStore(state => state.playlistVisible); // removed, handled globally
   const queue = usePlayerStore((s) => s.queue);
   const currentCid = usePlayerStore((s) => s.currentCid);
+  const isResolving = usePlayerStore((s) => s.isResolving);
   const [isPartsExpanded, setIsPartsExpanded] = useState(false);
 
   const isPlaying = playback.state === State.Playing;
@@ -68,25 +70,30 @@ export const PlayerScreen = () => {
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background, paddingTop: insets.top },
     header: {
-      height: 48, flexDirection: 'row', alignItems: 'center',
-      paddingHorizontal: t.spacing.sm, justifyContent: 'space-between',
+      height: 64, flexDirection: 'row', alignItems: 'center',
+      paddingHorizontal: t.spacing.xl, justifyContent: 'space-between',
+      marginTop: t.spacing.md,
+    },
+    headerTextContainer: {
+      flex: 1,
+      marginRight: t.spacing.lg,
+      overflow: 'hidden',
+    },
+    headerTitle: {
+      fontSize: t.fontSize.xxl, fontWeight: 'bold', color: textPrimary,
+    },
+    headerArtist: {
+      fontSize: t.fontSize.sm, color: textSecondary,
+      marginTop: 2,
     },
     body: { flex: 1 },
     cover: {
-      width: 280, height: 280, borderRadius: t.radius.xl,
-      marginTop: t.spacing.xl,
+      width: 320, height: 320, borderRadius: t.radius.xl,
+      marginTop: t.spacing.xxl + 40,
       shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24,
       shadowOffset: { width: 0, height: 8 }, elevation: 12,
     },
-    title: {
-      fontSize: t.fontSize.xxl, fontWeight: 'bold', color: textPrimary,
-      textAlign: 'center', marginTop: t.spacing.xxl,
-    },
-    artist: {
-      fontSize: t.fontSize.base, color: textSecondary,
-      textAlign: 'center', marginTop: t.spacing.xs,
-    },
-    progressBox: { width: '100%', marginTop: t.spacing.xxl },
+    progressBox: { width: '100%', marginTop: t.spacing.xxl + 50 },
     timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -2 },
     time: { fontSize: t.fontSize.xs, color: textTertiary },
     controls: {
@@ -97,6 +104,18 @@ export const PlayerScreen = () => {
       width: 64, height: 64, borderRadius: 32,
       backgroundColor: playBg,
       alignItems: 'center', justifyContent: 'center',
+    },
+    bottomBar: {
+      flexDirection: 'row', alignItems: 'center',
+      width: '100%', marginTop: t.spacing.xxl,
+      paddingHorizontal: t.spacing.xl,
+      paddingBottom: insets.bottom + t.spacing.xl,
+    },
+    bottomBarLeft: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: t.spacing.lg,
     },
     statusBar: {
       flexDirection: 'row', justifyContent: 'center',
@@ -194,15 +213,15 @@ export const PlayerScreen = () => {
       ) : null}
       <View style={s.contentLayer}>
         <View style={s.header}>
+          <View style={s.headerTextContainer}>
+            <MarqueeText text={track.title || '未知歌曲'} style={s.headerTitle} />
+            <Text style={s.headerArtist} numberOfLines={1}>{track.artist || '未知歌手'}</Text>
+          </View>
           <IconButton name="chevron-down" size={28} color={isGlass ? textPrimary : t.colors.text} onPress={() => nav.goBack()} />
-          <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text}
-            onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>
 
         <ScrollView style={s.body} contentContainerStyle={{ alignItems: 'center', paddingHorizontal: t.spacing.xl }} showsVerticalScrollIndicator={false}>
           <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
-          <Text style={s.title} numberOfLines={2}>{track.title}</Text>
-          <Text style={s.artist} numberOfLines={1}>{track.artist}</Text>
 
           <View style={s.progressBox}>
             <ProgressBar
@@ -228,8 +247,16 @@ export const PlayerScreen = () => {
             <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToNext()} />
           </View>
 
-          {isBuffering && (
-            <Text style={[s.time, { marginTop: 8 }]}>缓冲中...</Text>
+          <View style={s.bottomBar}>
+            <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text}
+              onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
+          </View>
+
+          {(isBuffering || isResolving) && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, opacity: 0.8 }}>
+              <ActivityIndicator size="small" color={textPrimary} />
+              <Text style={[s.time, { marginLeft: 6 }]}>加载中...</Text>
+            </View>
           )}
           {hasMultiParts && currentVideo && (
             <View style={s.partsContainer}>
