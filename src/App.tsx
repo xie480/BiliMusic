@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from './store/authStore';
 import { useSettingsStore } from './store/settingsStore';
 import { NavigationContainer, DefaultTheme, DarkTheme, useNavigationContainerRef } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createStackNavigator } from '@react-navigation/stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -24,7 +24,7 @@ import { storage } from './core/storage';
 import { useSyncStore } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
 
-const Stack = createNativeStackNavigator();
+const Stack = createStackNavigator();
 
 const withBackground = (Component: React.ComponentType<any>) => {
   return function ScreenWithBackground(props: any) {
@@ -59,7 +59,7 @@ export default function App() {
     ...(isDark ? DarkTheme : DefaultTheme),
     colors: {
       ...(isDark ? DarkTheme.colors : DefaultTheme.colors),
-      background: isGlassMode ? 'transparent' : (isDark ? DarkTheme.colors.background : DefaultTheme.colors.background),
+      background: 'transparent',
     },
   };
   const startSync = useSyncStore(state => state.startSync);
@@ -155,7 +155,7 @@ export default function App() {
             <NavigationContainer ref={navigationRef} theme={navTheme}>
               <Stack.Navigator
                 initialRouteName={loggedIn ? 'Folders' : 'Home'}
-                screenOptions={{ headerShown: false, animation: 'slide_from_right' }}
+                screenOptions={{ headerShown: false, cardStyle: { backgroundColor: 'transparent' } }}
               >
                 <Stack.Screen name="Home" component={HomeScreenWithBg} />
                 <Stack.Screen name="Folders" component={FoldersScreenWithBg} />
@@ -163,7 +163,7 @@ export default function App() {
                 <Stack.Screen
                   name="Player"
                   component={PlayerScreenWithBg}
-                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                  options={{ presentation: 'modal' }}
                 />
                 <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
                 <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
