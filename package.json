@@ -35,10 +35,12 @@
     "react-native-track-player": "^4.1.2",
     "react-native-vector-icons": "^10.3.0",
     "react-native-webview": "^13.16.1",
-    "zustand": "^5.0.12"
+    "zustand": "^5.0.12",
+    "@nozbe/watermelondb": "^0.27.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@babel/plugin-proposal-decorators": "^7.24.0",
     "@babel/preset-env": "^7.20.0",
     "@babel/runtime": "^7.20.0",
     "@react-native/babel-preset": "0.74.87",

@@ -17,7 +17,7 @@ import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
-import { favoriteService } from './services/favoriteService';
+import { favoriteService, loadGlobalIndexCache } from './services/favoriteService';
 import { PlaylistPanel } from './components/PlaylistPanel';
 import { useUIStore } from './store/uiStore';
 import { LoginModal } from './components/LoginModal';
@@ -109,21 +109,26 @@ export default function App() {
 
   // Rebuild global index on startup or when uid changes
   useEffect(() => {
-    if (uid) {
-      const lastUid = storage.getString('lastUid');
-      const globalIndex = favoriteService.getGlobalIndex();
-      
-      // 仅在切换账号或本地索引为空时清理旧索引，用户需在设置页面手动同步
-      if (lastUid !== uid || globalIndex.length === 0) {
-        // 仅清理旧数据，等待用户手动同步
-        favoriteService.clearGlobalIndex();
-        storage.setString('lastUid', uid);
+    const init = async () => {
+      if (uid) {
+        const lastUid = storage.getString('lastUid');
+        const globalIndex = favoriteService.getGlobalIndex();
+        
+        // 仅在切换账号或本地索引为空时清理旧索引，用户需在设置页面手动同步
+        if (lastUid !== uid || globalIndex.length === 0) {
+          // 仅清理旧数据，等待用户手动同步
+          await favoriteService.clearGlobalIndex();
+          storage.setString('lastUid', uid);
+        }
+        // 加载缓存
+        await loadGlobalIndexCache();
+      } else {
+        // 用户登出时清理数据
+        await favoriteService.clearGlobalIndex();
+        storage.delete('lastUid');
       }
-    } else {
-      // 用户登出时清理数据
-      favoriteService.clearGlobalIndex();
-      storage.delete('lastUid');
-    }
+    };
+    init();
   }, [uid]);
 
   // 监听 hiddenFolderIds 变化，自动触发全局索引重新同步
@@ -147,7 +152,10 @@ export default function App() {
     prevHiddenFolderIdsRef.current = hiddenFolderIds;
 
     // 用户修改了可见收藏夹偏好，重新构建全局索引
-    favoriteService.clearGlobalIndex();
+    (async () => {
+      await favoriteService.clearGlobalIndex();
+      await loadGlobalIndexCache();
+    })();
     // 自动同步已移除，用户可在设置页面手动同步
   }, [hiddenFolderIds, uid]);
 
