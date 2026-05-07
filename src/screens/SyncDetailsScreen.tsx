@@ -4,9 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Header } from '../components/Header';
 import { useTheme } from '../theme';
 import { favoriteService } from '../services/favoriteService';
-import { getAllSyncMetaMap } from '../db/operations';
+import { getAllPlaylistMeta } from '../db/operations';
 import { useAuthStore } from '../store/authStore';
-import type { FavoriteFolder, FolderSyncMeta } from '../types/domain';
+import type { FavoriteFolder } from '../types/domain';
+import type { PlaylistMeta } from '../db/models/PlaylistMeta';
 import { IconButton } from '../components/IconButton';
 import { Button } from '../components/Button';
 import { Loading } from '../components/Loading';
@@ -14,7 +15,29 @@ import { Empty } from '../components/Empty';
 
 interface FolderSyncInfo {
   folder: FavoriteFolder;
-  meta: FolderSyncMeta | null;
+  meta: PlaylistMeta | null;
+}
+
+/** 根据 PlaylistMeta 的状态生成显示文字和颜色 */
+function getSyncStatusDisplay(meta: PlaylistMeta | null) {
+  if (!meta) {
+    return { text: '未同步', color: 'textSub' as const };
+  }
+  switch (meta.syncStatus) {
+    case 'syncing':
+      return { text: `同步中 (${meta.localSyncedCount}/${meta.remoteVideoCount})`, color: 'primary' as const };
+    case 'success':
+      if (meta.needResync) {
+        return { text: `需重新同步 (${meta.localSyncedCount}/${meta.remoteVideoCount})`, color: 'warning' as const };
+      }
+      return { text: `已同步 (${meta.localSyncedCount}/${meta.remoteVideoCount})`, color: 'primary' as const };
+    case 'failed':
+      return { text: '同步失败', color: 'error' as const };
+    case 'running':
+      return { text: '中断（上次同步未完成）', color: 'warning' as const };
+    default:
+      return { text: `待同步 (${meta.localSyncedCount}/${meta.remoteVideoCount})`, color: 'textSub' as const };
+  }
 }
 
 export const SyncDetailsScreen = ({ navigation }: any) => {
@@ -30,11 +53,15 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
     setLoading(true);
     try {
       const folders = await favoriteService.getFolders(uid);
-      const metaMap = await getAllSyncMetaMap();
-      
+      const playlistMetas = await getAllPlaylistMeta();
+      const metaMap = new Map<string, PlaylistMeta>();
+      for (const meta of playlistMetas) {
+        metaMap.set(meta.playlistId, meta);
+      }
+
       const info = folders.map(f => ({
         folder: f,
-        meta: metaMap[f.id] || null,
+        meta: metaMap.get(f.id.toString()) || null,
       }));
       setFoldersInfo(info);
     } catch (e) {
@@ -90,19 +117,8 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
   const renderItem = ({ item }: { item: FolderSyncInfo }) => {
     const { folder, meta } = item;
     const isSelected = selectedIds.has(folder.id);
-    
-    let statusText = '未同步';
-    let statusColor = t.colors.textSub;
-    
-    if (meta) {
-      if (meta.needsFullSync) {
-        statusText = '需全量同步';
-        statusColor = t.colors.error;
-      } else {
-        statusText = `已同步 (${meta.mediaCount} 视频)`;
-        statusColor = t.colors.primary;
-      }
-    }
+    const status = getSyncStatusDisplay(meta);
+    const statusColor = t.colors[status.color];
 
     return (
       <View style={[styles.itemContainer, { backgroundColor: t.colors.surface, borderBottomColor: t.colors.divider }]}>
@@ -120,7 +136,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
             {folder.title}
           </Text>
           <Text style={[styles.subtitle, { color: statusColor }]} numberOfLines={1}>
-            {statusText}
+            {status.text}
           </Text>
         </View>
         {!isMultiSelectMode && meta && (

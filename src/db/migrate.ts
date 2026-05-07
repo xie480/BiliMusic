@@ -1,49 +1,17 @@
-import { storage as mmkvStorage } from '../core/storage';
-import { batchUpsertGlobalVideos, updateSyncMeta } from './operations';
-import type { FolderSyncMeta, FavoriteVideo } from '../types/domain';
+import { clearAllData } from './operations';
 
 /**
- * 将 MMKV 中已有的索引及同步元数据无损迁移至 WatermelonDB。
- * 迁移完成后可选择清除 MMKV 旧数据（默认不清除，保留兜底）。
+ * 数据库迁移脚本
+ * 由于底层数据结构发生了根本性变化（从 JSON 数组关联变为扁平化的一对多关系），
+ * 且旧表已被移除，最安全的策略是清除旧缓存，触发全量重新同步。
  */
-export async function migrateFromMMKV(clearOldData = false): Promise<{
-  syncedFolders: number;
-  migratedVideos: number;
-}> {
-  let migratedVideos = 0;
-  let syncedFolders = 0;
-
-  // 1. 迁移 FolderSyncMeta
-  const oldSyncMetaMap = mmkvStorage.getSyncMetaMap();
-  for (const folderIdStr of Object.keys(oldSyncMetaMap)) {
-    const folderId = parseInt(folderIdStr, 10);
-    const meta = oldSyncMetaMap[folderId];
-    if (meta && !isNaN(folderId)) {
-      await updateSyncMeta(meta);
-      syncedFolders++;
-    }
+export async function migrateToV2(): Promise<void> {
+  try {
+    console.log('[migrate] 开始执行 V2 数据库迁移/清理...');
+    // 清除所有新表数据，确保干净的状态
+    await clearAllData();
+    console.log('[migrate] V2 数据库清理完成，等待重新同步。');
+  } catch (error) {
+    console.error('[migrate] V2 数据库迁移失败:', error);
   }
-
-  // 2. 迁移 folderIndex 分片（GlobalVideos）
-  const indexedFolderIds = mmkvStorage.getAllIndexedFolderIds();
-  for (const folderId of indexedFolderIds) {
-    const videos: FavoriteVideo[] = mmkvStorage.getFolderIndex(folderId);
-    if (videos.length > 0) {
-      await batchUpsertGlobalVideos(videos);
-      migratedVideos += videos.length;
-    }
-  }
-
-  // 3. 可选清理 MMKV 旧数据
-  if (clearOldData) {
-    mmkvStorage.clearAllIndexes();
-    mmkvStorage.clearSyncMeta();
-  }
-
-  console.log(
-    `[migrate] MMKV → WatermelonDB 迁移完成：` +
-    `同步元数据 ${syncedFolders} 个，视频 ${migratedVideos} 条`
-  );
-
-  return { syncedFolders, migratedVideos };
 }

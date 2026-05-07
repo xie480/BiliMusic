@@ -314,7 +314,6 @@ export const SettingsScreen = ({ navigation }: any) => {
         <View style={s.group}>
           <ListItem
             title="将分P列表加入播放列表"
-            subtitle="开启后，点击下一首将播放当前视频的下一个分P；关闭则直接跳转到下一首"
             right={<Switch value={expandMultiPart} onValueChange={setExpandMultiPart} />}
           />
         </View>

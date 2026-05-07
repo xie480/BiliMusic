@@ -2,11 +2,14 @@ import { Database } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
 
 import { schema } from './schema';
-import { GlobalVideo } from './models/GlobalVideo';
-import { SyncMeta } from './models/SyncMeta';
+import migrations from './migrations';
+import { PlaylistMeta } from './models/PlaylistMeta';
+import { VideoMeta } from './models/VideoMeta';
+import { SyncJob } from './models/SyncJob';
 
 const adapter = new SQLiteAdapter({
   schema,
+  migrations,
   // jsi: true, // 可选启用 JSI 加速，需安装 react-native-quick-sqlite
   onSetUpError: (error) => {
     console.error('[DB] Setup error:', error);
@@ -15,8 +18,9 @@ const adapter = new SQLiteAdapter({
 
 export const database = new Database({
   adapter,
-  modelClasses: [GlobalVideo, SyncMeta],
+  modelClasses: [PlaylistMeta, VideoMeta, SyncJob],
 });
 
-export const globalVideoCollection = database.get<GlobalVideo>('global_videos');
-export const syncMetaCollection = database.get<SyncMeta>('sync_meta');
+export const playlistMetaCollection = database.get<PlaylistMeta>('playlist_meta');
+export const videoMetaCollection = database.get<VideoMeta>('video_meta');
+export const syncJobCollection = database.get<SyncJob>('sync_job');

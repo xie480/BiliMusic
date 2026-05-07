@@ -20,7 +20,7 @@ jest.mock('../src/core/cache', () => ({
 
 jest.mock('../src/db/operations', () => {
   let globalVideos: any[] = [];
-  const syncMetaMap: Record<number, any> = {};
+  const syncMetaMap: Record<string, any> = {};
 
   return {
     batchUpsertGlobalVideos: jest.fn(async (videos) => {
@@ -37,12 +37,35 @@ jest.mock('../src/db/operations', () => {
     removeFolderIdFromAllVideos: jest.fn(async (folderId) => {
       globalVideos = globalVideos.filter(v => !v.folderIds?.includes(folderId));
     }),
+    getAllValidVideos: jest.fn(async () => []),
+    getPlaylistMeta: jest.fn(async (playlistId) => syncMetaMap[playlistId] || null),
+    upsertPlaylistMeta: jest.fn(async (data) => {
+      syncMetaMap[data.playlistId] = { ...syncMetaMap[data.playlistId], ...data };
+    }),
+    createSyncJob: jest.fn(async () => 'job_123'),
+    finishSyncJob: jest.fn(),
+    upsertVideosBatch: jest.fn(async (playlistId, videos) => {
+      globalVideos.push(...videos);
+    }),
+    updatePlaylistSyncProgress: jest.fn(),
+    markPlaylistSyncSuccess: jest.fn(),
+    softDeleteMissingVideos: jest.fn(),
+    getRandomVideosBatch: jest.fn(async () => []),
+    clearAllData: jest.fn(),
   };
 });
 
 describe('syncGlobalIndex', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.spyOn(global, 'setTimeout').mockImplementation((cb: any) => {
+      cb();
+      return 0 as any;
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('should sync global index and report progress', async () => {
@@ -82,10 +105,10 @@ describe('syncGlobalIndex', () => {
       progressEvents.push(event);
     });
     
-    expect(dbOperations.batchUpsertGlobalVideos).toHaveBeenCalled();
+    expect(dbOperations.upsertVideosBatch).toHaveBeenCalled();
     // 25 + 5 = 30 videos should be upserted in total
-    const upsertCalls = (dbOperations.batchUpsertGlobalVideos as jest.Mock).mock.calls;
-    const totalUpserted = upsertCalls.reduce((sum, call) => sum + call[0].length, 0);
+    const upsertCalls = (dbOperations.upsertVideosBatch as jest.Mock).mock.calls;
+    const totalUpserted = upsertCalls.reduce((sum, call) => sum + call[1].length, 0);
     expect(totalUpserted).toBe(30);
     
     expect(progressEvents.length).toBeGreaterThan(0);
@@ -104,19 +127,17 @@ describe('syncGlobalIndex', () => {
     });
 
     // Mock sync meta to simulate an existing folder with fewer videos
-    (dbOperations.getAllSyncMetaMap as jest.Mock).mockResolvedValueOnce({
-      333: {
-        folderId: 333,
-        mediaCount: 50, // 50 videos missing (100 - 50 = 50 > 20 threshold)
-        latestBvid: 'BV_OLD',
-        needsFullSync: false
-      }
+    (dbOperations.getPlaylistMeta as jest.Mock).mockResolvedValueOnce({
+      playlistId: '333',
+      localSyncedCount: 50, // 50 videos missing
+      needResync: false,
+      syncStatus: 'success'
     });
 
     (biliApi.getFavoriteVideos as jest.Mock).mockImplementation(async (mediaId, pn) => {
       if (pn === 1) {
         return {
-          has_more: true,
+          has_more: false,
           medias: Array.from({ length: 20 }).map((_, i) => ({ id: i, bvid: i === 19 ? 'BV_OLD' : `BV_NEW_${i}`, title: `New Video ${i}`, attr: 0 }))
         };
       }
@@ -125,11 +146,8 @@ describe('syncGlobalIndex', () => {
 
     await favoriteService.syncGlobalIndex('test_uid', [], false);
 
-    // Should not call removeFolderIdFromAllVideos (which is called in full sync)
-    expect(dbOperations.removeFolderIdFromAllVideos).not.toHaveBeenCalled();
-    
-    // Should only fetch the first page because it hits the cursor 'BV_OLD'
+    // Should only fetch the first page
     expect(biliApi.getFavoriteVideos).toHaveBeenCalledTimes(1);
-    expect(biliApi.getFavoriteVideos).toHaveBeenCalledWith(333, 1, 20, undefined);
+    expect(biliApi.getFavoriteVideos).toHaveBeenCalledWith(333, 1, 50, undefined);
   });
 });

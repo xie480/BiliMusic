@@ -58,15 +58,3 @@ export interface PageResult<T> {
   /** 原始返回的记录数（在过滤失效视频前） */
   rawCount: number;
 }
-
-/** 收藏夹同步元数据 - 用于增量同步的状态追踪 */
-export interface FolderSyncMeta {
-  folderId: number;
-  lastSyncTime: number;
-  latestBvid: string | null;
-  mediaCount: number;
-  /** 标记该文件夹需要下次全量校准（检测到删除或同步中断时设置） */
-  needsFullSync?: boolean;
-  /** 最近一次同步完成的页码，用于断点续传 */
-  lastSyncedPage?: number;
-}

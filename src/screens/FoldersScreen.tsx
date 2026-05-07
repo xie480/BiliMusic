@@ -119,8 +119,8 @@ export const FoldersScreen = ({ navigation }: any) => {
   });
 
   const handleRandomPlayAll = async () => {
-    const globalIndex = favoriteService.getGlobalIndex();
-    if (globalIndex.length === 0) {
+    const shuffled = await favoriteService.getRandomVideos(undefined, 100);
+    if (shuffled.length === 0) {
       if (Platform.OS === 'android') {
         ToastAndroid.show(
           '全局索引为空或正在同步中，请稍后再试',
@@ -131,7 +131,6 @@ export const FoldersScreen = ({ navigation }: any) => {
       }
       return;
     }
-    const shuffled = [...globalIndex].sort(() => Math.random() - 0.5);
     setQueue(shuffled, shuffled[0]?.bvid);
     await loadQueue(shuffled, shuffled[0]?.bvid);
     await TrackPlayer.play();
@@ -460,41 +459,19 @@ export const FoldersScreen = ({ navigation }: any) => {
             title="混合播放"
             onPress={async () => {
               try {
-                // Fetch all videos from selected folders
                 const ids = Array.from(selectedIds);
-                let allVideos: any[] = [];
-                const globalIndex = favoriteService.getGlobalIndex();
+                // 从选中的收藏夹中随机获取视频
+                const results = await Promise.all(
+                  ids.map(id => favoriteService.getRandomVideos(id.toString(), 50))
+                );
+                let allVideos = results.flat();
+                
+                // 再次打乱混合后的结果
+                const shuffled = allVideos.sort(() => Math.random() - 0.5);
 
-                if (globalIndex.length > 0) {
-                  allVideos = globalIndex.filter((v) =>
-                    v.folderIds?.some((id) => ids.includes(id))
-                  );
-                } else {
-                  const fetchAll = async (folderId: number) => {
-                    const videos: any[] = [];
-                    let page = 1;
-                    let hasMore = true;
-                    while (hasMore) {
-                      const res = await favoriteService.getVideos(
-                        folderId,
-                        page
-                      );
-                      videos.push(...res.list);
-                      hasMore = res.hasMore;
-                      page += 1;
-                    }
-                    return videos;
-                  };
-                  const results = await Promise.all(
-                    ids.map(fetchAll)
-                  );
-                  allVideos = results.flat();
+                if (shuffled.length === 0) {
+                   throw new Error('选中的收藏夹为空');
                 }
-
-                // Shuffle
-                const shuffled = allVideos
-                  .slice()
-                  .sort(() => Math.random() - 0.5);
 
                 // Append to queue and start playback
                 await tpAppendQueue(shuffled);

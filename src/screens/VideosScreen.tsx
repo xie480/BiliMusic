@@ -148,16 +148,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
   const shuffle = async () => {
     try {
-      if (hasMore) await ensureAllLoaded();
-      const fullList = useFolderDataStore.getState().getDisplayedList();
-      if (fullList.length === 0) return;
-      
-      const shuffled = [...fullList];
-      // Fisher-Yates shuffle
-      for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-      }
+      // 使用 O(1) 随机获取
+      const shuffled = await favoriteService.getRandomVideos(mediaId.toString(), 100);
+      if (shuffled.length === 0) return;
       
       const target = shuffled[0];
       const context = { folderId: mediaId, sortOption, searchQuery };

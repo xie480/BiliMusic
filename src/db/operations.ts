@@ -1,281 +1,325 @@
-import { database, globalVideoCollection, syncMetaCollection } from './database';
+import { database, playlistMetaCollection, videoMetaCollection, syncJobCollection } from './database';
 import { Q } from '@nozbe/watermelondb';
-import type { FavoriteVideo, FolderSyncMeta } from '../types/domain';
+import type { FavoriteVideo } from '../types/domain';
 
 /**
- * 插入或更新一条全局视频记录。
- * 若 bvid 已存在则更新，否则创建。
+ * 批量插入或更新视频记录（针对特定收藏夹）
  */
-export async function upsertGlobalVideo(video: FavoriteVideo): Promise<void> {
-  await database.write(async writer => {
-    const existing = await globalVideoCollection.query(
-      Q.where('bvid', video.bvid),
-    ).fetch();
-    if (existing.length > 0) {
-      const record = existing[0];
-      // Merge existing folderIds with incoming ones
-      const existingFolderIds: number[] = (() => {
-        try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
-      })();
-      const incomingFolderIds: number[] = video.folderIds || [];
-      const mergedFolderIds = [...new Set([...existingFolderIds, ...incomingFolderIds])];
-      
-      await record.update(r => {
-        r.title = video.title;
-        r.cover = video.cover;
-        r.duration = video.duration;
-        r.page = video.page;
-        r.pubtime = video.pubtime;
-        r.upperMid = video.upper.mid;
-        r.upperName = video.upper.name;
-        r.attr = video.attr;
-        r.folderIds = JSON.stringify(mergedFolderIds);
-        r.parts = JSON.stringify(video.parts || []);
-      });
-    } else {
-      await globalVideoCollection.create(r => {
-        r.bvid = video.bvid;
-        r.title = video.title;
-        r.cover = video.cover;
-        r.duration = video.duration;
-        r.page = video.page;
-        r.pubtime = video.pubtime;
-        r.upperMid = video.upper.mid;
-        r.upperName = video.upper.name;
-        r.attr = video.attr;
-        r.folderIds = JSON.stringify(video.folderIds || []);
-        r.parts = JSON.stringify(video.parts || []);
-      });
-    }
-  });
-}
-
-/**
- * 批量插入或更新全局视频记录（事务性）。
- */
-export async function batchUpsertGlobalVideos(videos: FavoriteVideo[]): Promise<void> {
-  if (videos.length === 0) return;
+export async function upsertVideosBatch(playlistId: string, videos: FavoriteVideo[]): Promise<void> {
+  if (!videos || videos.length === 0) return;
 
   await database.write(async writer => {
-    const bvids = videos.map(v => v.bvid);
-    const existingRecords = await globalVideoCollection.query(
-      Q.where('bvid', Q.oneOf(bvids))
+    const videoIds = videos.map(v => v.bvid).filter(Boolean);
+    if (videoIds.length === 0) return;
+
+    // 1. 批量查出当前批次在本地已存在的记录
+    const existingRecords = await videoMetaCollection.query(
+      Q.where('playlist_id', playlistId),
+      Q.where('video_id', Q.oneOf(videoIds))
     ).fetch();
 
-    const existingMap = new Map<string, GlobalVideo>();
-    for (const record of existingRecords) {
-      existingMap.set(record.bvid, record);
-    }
-
+    const existingMap = new Map(existingRecords.map(r => [r.videoId, r]));
     const batchOperations: any[] = [];
 
+    // 2. 区分 create 和 update 操作
     for (const video of videos) {
-      const record = existingMap.get(video.bvid);
-      if (record) {
-        // Merge existing folderIds with incoming ones
-        const existingFolderIds: number[] = (() => {
-          try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
-        })();
-        const incomingFolderIds: number[] = video.folderIds || [];
-        const mergedFolderIds = [...new Set([...existingFolderIds, ...incomingFolderIds])];
-        
+      const existing = existingMap.get(video.bvid);
+      if (existing) {
         batchOperations.push(
-          record.prepareUpdate(r => {
-            r.title = video.title;
-            r.cover = video.cover;
-            r.duration = video.duration;
-            r.page = video.page;
-            r.pubtime = video.pubtime;
-            r.upperMid = video.upper.mid;
-            r.upperName = video.upper.name;
-            r.attr = video.attr;
-            r.folderIds = JSON.stringify(mergedFolderIds);
-            r.parts = JSON.stringify(video.parts || []);
+          existing.prepareUpdate(v => {
+            v.title = video.title;
+            v.cover = video.cover;
+            v.author = video.upper?.name || null;
+            v.duration = video.duration;
+            v.publishTime = video.pubtime;
+            v.isDeleted = false; // 恢复软删除
+            v.extraJson = JSON.stringify(video.parts || []);
           })
         );
       } else {
         batchOperations.push(
-          globalVideoCollection.prepareCreate(r => {
-            r.bvid = video.bvid;
-            r.title = video.title;
-            r.cover = video.cover;
-            r.duration = video.duration;
-            r.page = video.page;
-            r.pubtime = video.pubtime;
-            r.upperMid = video.upper.mid;
-            r.upperName = video.upper.name;
-            r.attr = video.attr;
-            r.folderIds = JSON.stringify(video.folderIds || []);
-            r.parts = JSON.stringify(video.parts || []);
+          videoMetaCollection.prepareCreate(v => {
+            v.videoId = video.bvid;
+            v.playlistId = playlistId;
+            v.title = video.title;
+            v.author = video.upper?.name || null;
+            v.cover = video.cover;
+            v.duration = video.duration;
+            v.publishTime = video.pubtime;
+            v.randomWeight = Math.random(); // 预生成随机权重
+            v.isCached = false;
+            v.isDeleted = false;
+            v.extraJson = JSON.stringify(video.parts || []);
+            v.syncedAt = new Date();
           })
         );
       }
     }
 
+    // 3. 统一执行 database.batch()
     await writer.batch(...batchOperations);
   });
 }
 
 /**
- * 读取全局索引（所有视频）。
+ * 获取收藏夹元数据
  */
-export async function getGlobalIndex(): Promise<FavoriteVideo[]> {
-  const records = await globalVideoCollection.query().fetch();
-  return records.map(r => ({
-    bvid: r.bvid,
-    title: r.title,
-    cover: r.cover,
-    duration: r.duration,
-    page: r.page,
-    pubtime: r.pubtime,
-    upper: { mid: r.upperMid, name: r.upperName },
-    attr: r.attr,
-    folderIds: JSON.parse(r.folderIds || '[]'),
-    parts: r.parts ? JSON.parse(r.parts) : undefined,
-  }));
-}
-
-/**
- * 根据 folderId 获取属于该收藏夹的所有视频。
- * 通过解析 folder_ids JSON 字段过滤。
- */
-export async function getVideosByFolderId(folderId: number): Promise<FavoriteVideo[]> {
-  const all = await getGlobalIndex();
-  return all.filter(v => v.folderIds?.includes(folderId));
-}
-
-/**
- * 获取某个收藏夹的同步元数据。
- */
-export async function getSyncMeta(folderId: number): Promise<FolderSyncMeta | null> {
-  const results = await syncMetaCollection.query(
-    Q.where('folder_id', folderId),
+export async function getPlaylistMeta(playlistId: string) {
+  const records = await playlistMetaCollection.query(
+    Q.where('playlist_id', playlistId)
   ).fetch();
-  if (results.length === 0) return null;
-  const meta = results[0];
-  return {
-    folderId: meta.folderId,
-    lastSyncTime: meta.lastSyncTime ? meta.lastSyncTime.getTime() : 0,
-    latestBvid: meta.latestBvid,
-    mediaCount: meta.mediaCount,
-    needsFullSync: !!meta.needsFullSync,
-    lastSyncedPage: meta.lastSyncedPage,
-  };
+  return records.length > 0 ? records[0] : null;
 }
 
 /**
- * 更新或插入单个收藏夹的同步元数据。
+ * 获取所有收藏夹的同步元数据（用于 SyncDetailsScreen 展示）
  */
-export async function updateSyncMeta(meta: FolderSyncMeta): Promise<void> {
+export async function getAllPlaylistMeta() {
+  return await playlistMetaCollection.query().fetch();
+}
+
+/**
+ * 彻底删除指定收藏夹的所有数据（元数据 + 关联视频 + 同步任务）
+ */
+export async function deletePlaylistAndVideos(playlistId: string): Promise<void> {
   await database.write(async writer => {
-    const results = await syncMetaCollection.query(
-      Q.where('folder_id', meta.folderId),
+    const batchOperations: any[] = [];
+
+    // 删除收藏夹元数据
+    const metas = await playlistMetaCollection.query(
+      Q.where('playlist_id', playlistId)
     ).fetch();
-    
-    const syncTime = new Date(meta.lastSyncTime);
-    
-    if (results.length > 0) {
-      await results[0].update(r => {
-        r.lastSyncTime = syncTime;
-        r.latestBvid = meta.latestBvid;
-        r.mediaCount = meta.mediaCount;
-        r.needsFullSync = meta.needsFullSync || false;
-        r.lastSyncedPage = meta.lastSyncedPage || null;
+    for (const meta of metas) {
+      batchOperations.push(meta.prepareMarkAsDeleted());
+    }
+
+    // 删除关联的视频记录
+    const videos = await videoMetaCollection.query(
+      Q.where('playlist_id', playlistId)
+    ).fetch();
+    for (const video of videos) {
+      batchOperations.push(video.prepareMarkAsDeleted());
+    }
+
+    // 删除关联的同步任务
+    const jobs = await syncJobCollection.query(
+      Q.where('playlist_id', playlistId)
+    ).fetch();
+    for (const job of jobs) {
+      batchOperations.push(job.prepareMarkAsDeleted());
+    }
+
+    if (batchOperations.length > 0) {
+      await writer.batch(...batchOperations);
+    }
+  });
+}
+
+/**
+ * 创建或更新收藏夹元数据
+ */
+export async function upsertPlaylistMeta(data: {
+  playlistId: string;
+  title?: string;
+  remoteVideoCount: number;
+  remoteRevision?: string;
+  syncStatus?: string;
+  needResync?: boolean;
+}) {
+  await database.write(async writer => {
+    const existing = await getPlaylistMeta(data.playlistId);
+    if (existing) {
+      await existing.update(record => {
+        if (data.title) record.title = data.title;
+        record.remoteVideoCount = data.remoteVideoCount;
+        if (data.remoteRevision) record.remoteRevision = data.remoteRevision;
+        if (data.syncStatus) record.syncStatus = data.syncStatus;
+        if (data.needResync !== undefined) record.needResync = data.needResync;
       });
     } else {
-      await syncMetaCollection.create(r => {
-        r.folderId = meta.folderId;
-        r.lastSyncTime = syncTime;
-        r.latestBvid = meta.latestBvid;
-        r.mediaCount = meta.mediaCount;
-        r.needsFullSync = meta.needsFullSync || false;
-        r.lastSyncedPage = meta.lastSyncedPage || null;
+      await playlistMetaCollection.create(record => {
+        record.playlistId = data.playlistId;
+        record.title = data.title || '';
+        record.remoteVideoCount = data.remoteVideoCount;
+        record.localSyncedCount = 0;
+        record.remoteRevision = data.remoteRevision || null;
+        record.syncStatus = data.syncStatus || 'idle';
+        record.needResync = data.needResync || false;
       });
     }
   });
 }
 
 /**
- * 获取所有同步元数据，以 folder_id 为键的映射。
+ * 更新收藏夹同步游标和已同步数量
  */
-export async function getAllSyncMetaMap(): Promise<Record<number, FolderSyncMeta>> {
-  const records = await syncMetaCollection.query().fetch();
-  const map: Record<number, FolderSyncMeta> = {};
-  for (const r of records) {
-    map[r.folderId] = {
-      folderId: r.folderId,
-      lastSyncTime: r.lastSyncTime ? r.lastSyncTime.getTime() : 0,
-      latestBvid: r.latestBvid,
-      mediaCount: r.mediaCount,
-      needsFullSync: !!r.needsFullSync,
-      lastSyncedPage: r.lastSyncedPage,
-    };
-  }
-  return map;
+export async function updatePlaylistSyncProgress(playlistId: string, cursor: string | null, syncedCountAdd: number) {
+  await database.write(async writer => {
+    const meta = await getPlaylistMeta(playlistId);
+    if (meta) {
+      await meta.update(record => {
+        record.syncCursor = cursor;
+        record.localSyncedCount += syncedCountAdd;
+      });
+    }
+  });
 }
 
 /**
- * 从所有包含该 folderId 的视频记录中移除该 folderId。
- * 若移除后 folderIds 为空，则删除该记录。
- * 用于全量同步前清除旧数据。
+ * 标记收藏夹同步完成
  */
-export async function removeFolderIdFromAllVideos(folderId: number): Promise<void> {
-  // 先读取所有包含该 folderId 的视频（在写事务外读取）
-  const allVideos = await getGlobalIndex();
-  const affectedBvids = allVideos.filter(v => v.folderIds?.includes(folderId)).map(v => v.bvid);
-
-  if (affectedBvids.length === 0) return;
-
+export async function markPlaylistSyncSuccess(playlistId: string) {
   await database.write(async writer => {
-    const records = await globalVideoCollection.query(
-      Q.where('bvid', Q.oneOf(affectedBvids))
+    const meta = await getPlaylistMeta(playlistId);
+    if (meta) {
+      await meta.update(record => {
+        record.syncStatus = 'success';
+        record.lastSyncedAt = new Date();
+        record.needResync = false;
+        record.syncCursor = null; // 清空游标
+      });
+    }
+  });
+}
+
+/**
+ * 创建同步任务
+ */
+export async function createSyncJob(playlistId: string, snapshotRevision: string | null) {
+  let jobId = '';
+  await database.write(async writer => {
+    const job = await syncJobCollection.create(record => {
+      record.jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      record.playlistId = playlistId;
+      record.status = 'running';
+      record.snapshotRevision = snapshotRevision;
+      record.syncedCount = 0;
+      record.startedAt = new Date();
+    });
+    jobId = job.jobId;
+  });
+  return jobId;
+}
+
+/**
+ * 更新同步任务状态
+ */
+export async function finishSyncJob(jobId: string, status: 'success' | 'failed' | 'cancelled', failedReason?: string) {
+  await database.write(async writer => {
+    const records = await syncJobCollection.query(Q.where('job_id', jobId)).fetch();
+    if (records.length > 0) {
+      await records[0].update(record => {
+        record.status = status;
+        record.finishedAt = new Date();
+        if (failedReason) record.failedReason = failedReason;
+      });
+    }
+  });
+}
+
+/**
+ * 执行软删除：将本地存在但远端不存在的视频标记为已删除
+ */
+export async function softDeleteMissingVideos(playlistId: string, remoteVideoIds: string[]) {
+  await database.write(async writer => {
+    // 获取本地该收藏夹下所有未删除的视频
+    const localVideos = await videoMetaCollection.query(
+      Q.where('playlist_id', playlistId),
+      Q.where('is_deleted', false)
     ).fetch();
 
+    const remoteSet = new Set(remoteVideoIds);
     const batchOperations: any[] = [];
-    
-    for (const record of records) {
-      const currentFolderIds: number[] = (() => {
-        try { return JSON.parse(record.folderIds || '[]'); } catch { return []; }
-      })();
-      const newFolderIds = currentFolderIds.filter(id => id !== folderId);
-      if (newFolderIds.length === 0) {
-        batchOperations.push(record.prepareMarkAsDeleted());
-      } else {
+
+    for (const video of localVideos) {
+      if (!remoteSet.has(video.videoId)) {
         batchOperations.push(
-          record.prepareUpdate(r => {
-            r.folderIds = JSON.stringify(newFolderIds);
+          video.prepareUpdate(v => {
+            v.isDeleted = true;
           })
         );
       }
     }
-    await writer.batch(...batchOperations);
+
+    if (batchOperations.length > 0) {
+      await writer.batch(...batchOperations);
+    }
   });
 }
 
 /**
- * 清除所有索引数据和同步元数据。
+ * 获取所有有效视频（未删除）
  */
-export async function clearAllIndexes(): Promise<void> {
-  await database.write(async writer => {
-    await globalVideoCollection.query().markAllAsDeleted();
-    await syncMetaCollection.query().markAllAsDeleted();
-  });
+export async function getAllValidVideos() {
+  return await videoMetaCollection.query(
+    Q.where('is_deleted', false),
+    Q.sortBy('publish_time', Q.desc)
+  ).fetch();
 }
 
 /**
- * 删除指定收藏夹的同步元数据。
+ * 获取收藏夹下的所有有效视频（未删除）
  */
-export async function deleteSyncMeta(folderId: number): Promise<void> {
-  await database.write(async writer => {
-    const records = await syncMetaCollection.query(
-      Q.where('folder_id', folderId),
-    ).fetch();
-    for (const r of records) {
-      if ((r as any).destroyPermanently) {
-        await (r as any).destroyPermanently();
-      } else {
-        await r.markAsDeleted();
+export async function getVideosByPlaylistId(playlistId: string) {
+  return await videoMetaCollection.query(
+    Q.where('playlist_id', playlistId),
+    Q.where('is_deleted', false),
+    Q.sortBy('publish_time', Q.desc)
+  ).fetch();
+}
+
+/**
+ * 随机获取一批视频（用于随机播放队列）
+ */
+export async function getRandomVideosBatch(playlistId?: string, limit: number = 50) {
+  const randomVal = Math.random();
+  
+  let queryArgs: Q.Clause[] = [
+    Q.where('is_deleted', false),
+    Q.where('random_weight', Q.gt(randomVal)),
+    Q.sortBy('random_weight', Q.asc),
+    Q.take(limit)
+  ];
+
+  if (playlistId) {
+    queryArgs.unshift(Q.where('playlist_id', playlistId));
+  }
+
+  let records = await videoMetaCollection.query(...queryArgs).fetch();
+
+  // 如果数量不够，回绕从头找补充
+  if (records.length < limit) {
+    const remaining = limit - records.length;
+    let fallbackArgs: Q.Clause[] = [
+      Q.where('is_deleted', false),
+      Q.sortBy('random_weight', Q.asc),
+      Q.take(remaining)
+    ];
+    if (playlistId) {
+      fallbackArgs.unshift(Q.where('playlist_id', playlistId));
+    }
+    const fallbackRecords = await videoMetaCollection.query(...fallbackArgs).fetch();
+    
+    // 去重合并
+    const seen = new Set(records.map(r => r.videoId));
+    for (const r of fallbackRecords) {
+      if (!seen.has(r.videoId)) {
+        records.push(r);
+        seen.add(r.videoId);
       }
     }
+  }
+
+  return records;
+}
+
+/**
+ * 清除所有数据
+ */
+export async function clearAllData(): Promise<void> {
+  await database.write(async writer => {
+    await playlistMetaCollection.query().markAllAsDeleted();
+    await videoMetaCollection.query().markAllAsDeleted();
+    await syncJobCollection.query().markAllAsDeleted();
   });
 }

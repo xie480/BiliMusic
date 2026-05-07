@@ -81,6 +81,16 @@ jest.mock('@react-navigation/native-stack', () => {
   };
 });
 
+jest.mock('@react-navigation/stack', () => {
+  return {
+    createStackNavigator: () => ({
+      Navigator: ({ children }) => <>{children}</>,
+      Screen: () => null,
+    }),
+    __esModule: true,
+  };
+});
+
 // Mock Settings module to avoid native SettingsManager errors
 jest.mock('react-native/Libraries/Settings/Settings', () => ({
   get: jest.fn(),
@@ -98,6 +108,7 @@ jest.mock('react-native-safe-area-context', () => {
   const React = require('react');
   return {
     SafeAreaProvider: ({ children }) => <>{children}</>,
+    useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
     __esModule: true,
   };
 });
@@ -160,8 +171,49 @@ jest.mock('@react-native-cookies/cookies', () => ({
   },
 }));
 
+// Mock react-native-keychain for Jest environment
+jest.mock('react-native-keychain', () => ({
+  setGenericPassword: jest.fn(() => Promise.resolve(true)),
+  getGenericPassword: jest.fn(() => Promise.resolve(false)),
+  resetGenericPassword: jest.fn(() => Promise.resolve(true)),
+}));
+
+// Mock GlassBackground to avoid Animated.timing issues in tests
+jest.mock('../src/components/GlassBackground', () => {
+  const { View } = require('react-native');
+  return {
+    GlassBackground: () => <View testID="mock-glass-background" />,
+  };
+});
+
 // Mock react-native-webview using manual mock to avoid native module errors in Jest environment
 jest.mock('react-native-webview');
+
+// Mock react-native-image-crop-picker to avoid native module errors in Jest environment
+jest.mock('react-native-image-crop-picker', () => ({
+  __esModule: true,
+  default: {
+    openPicker: jest.fn(),
+    openCamera: jest.fn(),
+    openCropper: jest.fn(),
+  },
+}));
+
+// Mock WatermelonDB SQLite adapter to avoid native module errors
+jest.mock('@nozbe/watermelondb/adapters/sqlite', () => {
+  return jest.fn().mockImplementation(() => ({
+    batch: jest.fn(),
+    // Provide a mocked schema to prevent Database constructor from crashing
+    schema: {
+      tables: {
+        playlist_meta: { name: 'playlist_meta', columns: [] },
+        video_meta: { name: 'video_meta', columns: [] },
+        sync_job: { name: 'sync_job', columns: [] },
+      },
+    },
+  }));
+});
+
 import App from '../App';
 
 // Note: import explicitly to use the types shipped with jest.
