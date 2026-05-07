@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import FastImage from 'react-native-fast-image';
-import TrackPlayer, {
-  useActiveTrack, usePlaybackState, useProgress, State,
-} from 'react-native-track-player';
+import TrackPlayer, { useActiveTrack, usePlaybackState, useProgress, State } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
@@ -18,6 +16,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { netStatus } from '../services/netStatus';
 import { usePlayerStore } from '../store/playerStore';
 import { playSpecificPart } from '../services/trackPlayer';
+import { useSyncStore } from '../store/syncStore';
 
 export const PlayerScreen = () => {
   const t = useTheme();
@@ -31,6 +30,9 @@ export const PlayerScreen = () => {
   const queue = usePlayerStore((s) => s.queue);
   const currentCid = usePlayerStore((s) => s.currentCid);
   const isResolving = usePlayerStore((s) => s.isResolving);
+  const playMode = usePlayerStore((s) => s.playMode);
+  const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
+  const syncStatus = useSyncStore((s) => s.syncStatus);
   const [isPartsExpanded, setIsPartsExpanded] = useState(false);
 
   const isPlaying = playback.state === State.Playing;
@@ -63,15 +65,20 @@ export const PlayerScreen = () => {
   const dividerColor = t.colors.divider;
   const blurRadius = isGlass ? g!.material.blurRadius : 0;
   const playBg = isGlass
-    ? (typeof g!.colors.button.playBg === 'string' ? g!.colors.button.playBg : g!.colors.button.playBg[0])
+    ? typeof g!.colors.button.playBg === 'string'
+      ? g!.colors.button.playBg
+      : g!.colors.button.playBg[0]
     : t.colors.primary;
   const playTextColor = isGlass ? g!.colors.button.playText : '#fff';
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background, paddingTop: insets.top },
     header: {
-      height: 64, flexDirection: 'row', alignItems: 'center',
-      paddingHorizontal: t.spacing.xl, justifyContent: 'space-between',
+      height: 64,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: t.spacing.xl,
+      justifyContent: 'space-between',
       marginTop: t.spacing.md,
     },
     headerTextContainer: {
@@ -79,118 +86,33 @@ export const PlayerScreen = () => {
       marginRight: t.spacing.lg,
       overflow: 'hidden',
     },
-    headerTitle: {
-      fontSize: t.fontSize.xxl, fontWeight: 'bold', color: textPrimary,
-    },
-    headerArtist: {
-      fontSize: t.fontSize.sm, color: textSecondary,
-      marginTop: 2,
-    },
+    headerTitle: { fontSize: t.fontSize.xxl, fontWeight: 'bold', color: textPrimary },
+    headerArtist: { fontSize: t.fontSize.sm, color: textSecondary, marginTop: 2 },
     body: { flex: 1 },
-    cover: {
-      width: 320, height: 320, borderRadius: t.radius.xl,
-      marginTop: t.spacing.xxl + 40,
-      shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24,
-      shadowOffset: { width: 0, height: 8 }, elevation: 12,
-    },
+    cover: { width: 320, height: 320, borderRadius: t.radius.xl, marginTop: t.spacing.xxl + 40, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
     progressBox: { width: '100%', marginTop: t.spacing.xxl + 50 },
     timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -2 },
     time: { fontSize: t.fontSize.xs, color: textTertiary },
-    controls: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
-      width: '100%', marginTop: t.spacing.xxl,
-    },
-    playBtn: {
-      width: 64, height: 64, borderRadius: 32,
-      backgroundColor: playBg,
-      alignItems: 'center', justifyContent: 'center',
-    },
-    bottomBar: {
-      flexDirection: 'row', alignItems: 'center',
-      width: '100%', marginTop: t.spacing.xxl,
-      paddingHorizontal: t.spacing.xl,
-      paddingBottom: insets.bottom + t.spacing.xl,
-    },
-    bottomBarLeft: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: t.spacing.lg,
-    },
-    statusBar: {
-      flexDirection: 'row', justifyContent: 'center',
-      paddingBottom: insets.bottom + t.spacing.lg,
-      gap: t.spacing.lg,
-    },
-    statusItem: {
-      flexDirection: 'row', alignItems: 'center', gap: 4,
-    },
+    controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', width: '100%', marginTop: t.spacing.xxl },
+    playBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: playBg, alignItems: 'center', justifyContent: 'center' },
+    bottomBar: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: t.spacing.xxl, paddingHorizontal: t.spacing.xl, paddingBottom: insets.bottom + t.spacing.xl },
+    bottomBarLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: t.spacing.lg },
+    statusBar: { flexDirection: 'row', justifyContent: 'center', paddingBottom: insets.bottom + t.spacing.lg, gap: t.spacing.lg },
+    statusItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     statusText: { fontSize: t.fontSize.xs, color: textTertiary },
-    partsContainer: {
-      alignSelf: 'stretch',
-      marginTop: t.spacing.md,
-    },
-    partsHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: t.spacing.md,
-      paddingVertical: t.spacing.sm,
-      backgroundColor: surfaceBg,
-      borderRadius: t.radius.md,
-    },
-    partsHeaderText: {
-      fontSize: t.fontSize.base,
-      color: textPrimary,
-      fontWeight: '500',
-    },
-    partsList: {
-      maxHeight: 250,
-      marginTop: 4,
-      borderRadius: t.radius.md,
-      backgroundColor: surfaceBg,
-    },
-    partItem: {
-      paddingHorizontal: t.spacing.md,
-      paddingVertical: t.spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: dividerColor,
-    },
-    partItemActive: {
-      backgroundColor: accentPrimary + '20',
-    },
-    partItemContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    partItemText: {
-      fontSize: t.fontSize.sm,
-      color: textPrimary,
-      flex: 1,
-      marginRight: 8,
-    },
-    partItemTextActive: {
-      color: accentPrimary,
-      fontWeight: '600',
-    },
-    playingIndicator: {
-      fontSize: t.fontSize.xs,
-      color: accentPrimary,
-    },
-    blurBackground: {
-      ...StyleSheet.absoluteFillObject,
-      zIndex: 0,
-    },
-    blurOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: isGlass ? g!.colors.glass.bg : 'transparent',
-      zIndex: 1,
-    },
-    contentLayer: {
-      flex: 1,
-      zIndex: 2,
-    },
+    partsContainer: { alignSelf: 'stretch', marginTop: t.spacing.md },
+    partsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, backgroundColor: surfaceBg, borderRadius: t.radius.md },
+    partsHeaderText: { fontSize: t.fontSize.base, color: textPrimary, fontWeight: '500' },
+    partsList: { maxHeight: 250, marginTop: 4, borderRadius: t.radius.md, backgroundColor: surfaceBg },
+    partItem: { paddingHorizontal: t.spacing.md, paddingVertical: t.spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: dividerColor },
+    partItemActive: { backgroundColor: accentPrimary + '20' },
+    partItemContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    partItemText: { fontSize: t.fontSize.sm, color: textPrimary, flex: 1, marginRight: 8 },
+    partItemTextActive: { color: accentPrimary, fontWeight: '600' },
+    playingIndicator: { fontSize: t.fontSize.xs, color: accentPrimary },
+    blurBackground: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
+    blurOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: isGlass ? g!.colors.glass.bg : 'transparent', zIndex: 1 },
+    contentLayer: { flex: 1, zIndex: 2 },
   });
 
   const onSeekEnd = (p: number) => {
@@ -202,12 +124,7 @@ export const PlayerScreen = () => {
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       {isGlass && track.artwork ? (
         <>
-          <Image
-            source={{ uri: track.artwork as string }}
-            style={s.blurBackground}
-            blurRadius={blurRadius}
-            resizeMode="cover"
-          />
+          <Image source={{ uri: track.artwork as string }} style={s.blurBackground} blurRadius={blurRadius} resizeMode="cover" />
           <View style={s.blurOverlay} pointerEvents="none" />
         </>
       ) : null}
@@ -215,43 +132,39 @@ export const PlayerScreen = () => {
         <View style={s.header}>
           <View style={s.headerTextContainer}>
             <MarqueeText text={track.title || '未知歌曲'} style={s.headerTitle} />
-            <Text style={s.headerArtist} numberOfLines={1}>{track.artist || '未知歌手'}</Text>
+            <Text style={s.headerArtist} numberOfLines={1}>
+              {track.artist || '未知歌手'}
+            </Text>
           </View>
           <IconButton name="chevron-down" size={28} color={isGlass ? textPrimary : t.colors.text} onPress={() => nav.goBack()} />
         </View>
-
         <ScrollView style={s.body} contentContainerStyle={{ alignItems: 'center', paddingHorizontal: t.spacing.xl }} showsVerticalScrollIndicator={false}>
           <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
-
           <View style={s.progressBox}>
-            <ProgressBar
-              progress={progress.duration > 0 ? progress.position / progress.duration : 0}
-              onSeekEnd={onSeekEnd}
-            />
+            <ProgressBar progress={progress.duration > 0 ? progress.position / progress.duration : 0} onSeekEnd={onSeekEnd} />
             <View style={s.timeRow}>
               <Text style={s.time}>{formatDuration(progress.position)}</Text>
               <Text style={s.time}>{formatDuration(progress.duration)}</Text>
             </View>
           </View>
-
           <View style={s.controls}>
             <IconButton name="skip-previous" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToPrevious()} />
             <View style={s.playBtn}>
-              <IconButton
-                name={isPlaying ? 'pause' : 'play'}
-                size={32}
-                color={playTextColor}
-                onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())}
-              />
+              <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())} />
             </View>
             <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToNext()} />
           </View>
-
           <View style={s.bottomBar}>
-            <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text}
-              onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
+            <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text} onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
+            <IconButton
+              name={playMode === 'shuffle' ? 'shuffle' : 'repeat'}
+              size={24}
+              color={isGlass ? textPrimary : t.colors.text}
+              onPress={togglePlayMode}
+              disabled={syncStatus === 'syncing'}
+              style={{ marginLeft: t.spacing.lg }}
+            />
           </View>
-
           {(isBuffering || isResolving) && (
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 8, opacity: 0.8 }}>
               <ActivityIndicator size="small" color={textPrimary} />
@@ -260,22 +173,14 @@ export const PlayerScreen = () => {
           )}
           {hasMultiParts && currentVideo && (
             <View style={s.partsContainer}>
-              <TouchableOpacity
-                style={s.partsHeader}
-                onPress={() => setIsPartsExpanded(!isPartsExpanded)}
-                activeOpacity={0.7}
-              >
+              <TouchableOpacity style={s.partsHeader} onPress={() => setIsPartsExpanded(!isPartsExpanded)} activeOpacity={0.7}>
                 <Text style={s.partsHeaderText} numberOfLines={1}>
-                  {currentPart ? `P${(currentVideo.parts!.findIndex(p => p.cid === currentCid) + 1)}/${currentVideo.parts!.length} ${currentPart.title}` : `选集 (${currentVideo.parts!.length})`}
+                  {currentPart ? `P${(currentVideo.parts!.findIndex((p) => p.cid === currentCid) + 1)}/${currentVideo.parts!.length} ${currentPart.title}` : `选集 (${currentVideo.parts!.length})`}
                 </Text>
                 <Icon name={isPartsExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={textSecondary} />
               </TouchableOpacity>
               {isPartsExpanded && (
-                <ScrollView
-                  style={s.partsList}
-                  showsVerticalScrollIndicator={false}
-                  nestedScrollEnabled={true}
-                >
+                <ScrollView style={s.partsList} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
                   {currentVideo.parts!.map((part) => {
                     const isActive = part.cid === currentCid;
                     return (
@@ -289,15 +194,10 @@ export const PlayerScreen = () => {
                         activeOpacity={0.7}
                       >
                         <View style={s.partItemContent}>
-                          <Text
-                            style={[s.partItemText, isActive && s.partItemTextActive]}
-                            numberOfLines={1}
-                          >
+                          <Text style={[s.partItemText, isActive && s.partItemTextActive]} numberOfLines={1}>
                             {part.title}
                           </Text>
-                          {isActive && (
-                            <Text style={s.playingIndicator}>▶</Text>
-                          )}
+                          {isActive && <Text style={s.playingIndicator}>▶</Text>}
                         </View>
                       </TouchableOpacity>
                     );

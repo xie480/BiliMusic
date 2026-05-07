@@ -1,5 +1,5 @@
 // src/components/PlaylistPanel.tsx (refactored)
-import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
+import React, { useCallback, memo, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo } from 'react-native';
 import TrackPlayer from 'react-native-track-player';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -11,6 +11,7 @@ import type { FavoriteVideo } from '../types/domain';
 import { formatDuration } from '../utils/format';
 import { playSpecificPart } from '../services/trackPlayer';
 import { useFolderDataStore } from '../store/folderDataStore';
+import { useSyncStore } from '../store/syncStore';
 
 /**
  * 全局播放列表面板，支持当前播放高亮、自动定位。
@@ -23,13 +24,16 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const playContext = usePlayerStore((s) => s.playContext);
   const appendQueue = usePlayerStore((s) => s.appendQueue);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const playMode = usePlayerStore((s) => s.playMode);
+  const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
+  const syncStatus = useSyncStore((s) => s.syncStatus);
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const listRef = useRef<any>(null);
 
   const initialIndex = React.useMemo(() => {
     if (currentBvid && queue.length > 0) {
-      const idx = queue.findIndex(v => v.bvid === currentBvid);
+      const idx = queue.findIndex((v) => v.bvid === currentBvid);
       return idx >= 0 ? idx : 0;
     }
     return 0;
@@ -38,7 +42,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   // 点击歌曲条目：立即跳转播放
   const handlePress = useCallback(async (bvid: string) => {
     const q = usePlayerStore.getState().queue;
-    const idx = q.findIndex(v => v.bvid === bvid);
+    const idx = q.findIndex((v) => v.bvid === bvid);
     if (idx !== -1) {
       await TrackPlayer.skip(idx);
       TrackPlayer.play();
@@ -65,23 +69,20 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     primaryColor: string;
   }) => (
     <View>
-      <View
-        style={[
-          styles.item,
-          { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface },
-        ]}
-      >
+      <View style={[styles.item, { backgroundColor: isCurrent ? t.colors.primaryLight : t.colors.surface }]}> 
         {/* 信息区 - 点击播放歌曲 */}
-        <RNTouchableOpacity
-          style={styles.infoTouchable}
-          onPress={onPlay}
-          activeOpacity={0.6}
-        >
+        <RNTouchableOpacity style={styles.infoTouchable} onPress={onPlay} activeOpacity={0.6}>
           <View style={styles.info}>
-            <Text style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} numberOfLines={1} ellipsizeMode="tail">
+            <Text
+              style={[{ color: t.colors.text }, styles.title, isCurrent && { color: primaryColor, fontWeight: '700' }]} 
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
               {item.title}
             </Text>
-            <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">{item.upper.name}</Text>
+            <Text style={[styles.sub, { color: t.colors.textSub }]} numberOfLines={1} ellipsizeMode="tail">
+              {item.upper.name}
+            </Text>
           </View>
         </RNTouchableOpacity>
         {/* 操作按钮 - 绝对定位在右侧 */}
@@ -91,16 +92,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
               <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={t.colors.textHint} />
             </RNTouchableOpacity>
           )}
-          <IconButton
-            name="delete"
-            size={20}
-            color={t.colors.error}
-            onPress={() => removeFromQueue(item.bvid)}
-          />
+          <IconButton name="delete" size={20} color={t.colors.error} onPress={() => removeFromQueue(item.bvid)} />
         </View>
       </View>
       {isExpanded && item.parts && item.parts.length > 1 && (
-        <View style={[styles.partsContainer, { borderLeftColor: t.colors.divider }]}>
+        <View style={[styles.partsContainer, { borderLeftColor: t.colors.divider }]}> 
           {item.parts.map((part) => (
             <RNTouchableOpacity
               key={part.cid}
@@ -108,7 +104,9 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
               onPress={() => onPartPress(part.cid, part.title)}
               activeOpacity={0.7}
             >
-              <Text style={[styles.partTitle, { color: t.colors.textSub }]} numberOfLines={1}>{part.title}</Text>
+              <Text style={[styles.partTitle, { color: t.colors.textSub }]} numberOfLines={1}>
+                {part.title}
+              </Text>
               <Text style={[styles.partDuration, { color: t.colors.textHint }]}>{formatDuration(part.duration)}</Text>
             </RNTouchableOpacity>
           ))}
@@ -131,7 +129,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         onPlay={() => handlePress(item.bvid)}
         isExpanded={expandedBvid === item.bvid}
         onPartPress={(cid, partTitle) => handlePartPress(item.bvid, cid, partTitle)}
-        onExpandToggle={() => setExpandedBvid(prev => (prev === item.bvid ? null : item.bvid))}
+        onExpandToggle={() => setExpandedBvid((prev) => (prev === item.bvid ? null : item.bvid))}
         isCurrent={item.bvid === currentBvid}
         primaryColor={t.colors.primary}
       />
@@ -164,7 +162,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       const beforeList = folderStore.getDisplayedList();
       await folderStore.loadMore();
       const afterList = folderStore.getDisplayedList();
-      
+
       const newItems = afterList.slice(beforeList.length);
       if (newItems.length > 0) {
         await appendQueue(newItems);
@@ -179,7 +177,16 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const playlistContent = (
     <>
       <View style={[styles.header, { borderBottomColor: t.colors.divider }]}>
-        <Text style={[styles.headerTitle, { color: t.colors.text }]}>播放列表</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={[styles.headerTitle, { color: t.colors.text, marginRight: 8 }]}>播放列表</Text>
+          <IconButton
+            name={playMode === 'shuffle' ? 'shuffle' : 'repeat'}
+            size={20}
+            color={t.colors.text}
+            onPress={togglePlayMode}
+            disabled={syncStatus === 'syncing'}
+          />
+        </View>
         <IconButton name="close" size={24} color={t.colors.text} onPress={onClose} />
       </View>
       {visible && (
@@ -192,11 +199,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           onScrollToIndexFailed={handleScrollToIndexFailed}
           contentContainerStyle={styles.list}
           initialScrollIndex={initialIndex}
-          getItemLayout={(data, index) => ({
-            length: 64,
-            offset: 64 * index,
-            index,
-          })}
+          getItemLayout={(data, index) => ({ length: 64, offset: 64 * index, index })}
           initialNumToRender={10}
           maxToRenderPerBatch={10}
           windowSize={5}
@@ -213,16 +216,11 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         {isGlass ? (
-          <GlassView
-            style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }}
-            borderRadius={12}
-          >
+          <GlassView style={{ maxHeight: '80%', borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingBottom: 20 }} borderRadius={12}>
             {playlistContent}
           </GlassView>
         ) : (
-          <View style={[styles.container, { backgroundColor: t.colors.background }]}>
-            {playlistContent}
-          </View>
+          <View style={[styles.container, { backgroundColor: t.colors.background }]}>{playlistContent}</View>
         )}
       </View>
     </Modal>
@@ -267,7 +265,7 @@ const styles = StyleSheet.create({
   },
   infoTouchable: {
     flex: 1,
-    paddingRight: 80, // 为右侧绝对定位的按钮留出空间
+    paddingRight: 80,
     justifyContent: 'center',
   },
   info: {
@@ -315,6 +313,5 @@ const styles = StyleSheet.create({
   partDuration: {
     fontSize: 11,
     color: '#999',
-    marginLeft: 8,
   },
 });
