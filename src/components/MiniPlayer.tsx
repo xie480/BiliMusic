@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'rea
 import LinearGradient from 'react-native-linear-gradient';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, {
-  useActiveTrack, usePlaybackState, useProgress, State,
+  useActiveTrack, usePlaybackState, State,
 } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import { IconButton } from './IconButton';
@@ -11,12 +11,13 @@ import { GlassView } from './GlassView';
 import { useTheme } from '../theme';
 import { useUIStore } from '../store/uiStore';
 import { usePlayerStore } from '../store/playerStore';
+import { useProgressStore } from '../store/progressStore';
 
 export const MiniPlayer: React.FC = () => {
   const t = useTheme();
   const track = useActiveTrack();
   const playback = usePlaybackState();
-  const progress = useProgress();
+  const progress = useProgressStore();
   const nav = useNavigation<any>();
   const isGlass = !!t.glass;
   const isResolving = usePlayerStore((s) => s.isResolving);

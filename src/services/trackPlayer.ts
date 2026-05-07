@@ -12,6 +12,7 @@ import { performanceMonitor } from './performanceMonitor';
 import { State } from 'react-native-track-player';
 import type { FavoriteVideo } from '../types/domain';
 import { storage } from '../core/storage';
+import { useProgressStore } from '../store/progressStore';
 
 // 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
 const resolving = new Set<number>();
@@ -46,7 +47,7 @@ export async function setupPlayer() {
     AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         try {
-          const progress = await TrackPlayer.getProgress();
+          const progress = useProgressStore.getState();
           if (progress.position > 0) {
             storage.setNumber('lastPlaybackPosition', progress.position);
           }
@@ -164,43 +165,76 @@ export async function removeFromQueue(bvid: string): Promise<void> {
 
 /**
  * Reorder the entire queue. Optionally start playing from a specific BVID.
+ *
+ * 性能优化：使用 reset() + 批量 add() 替代逐个 move() 调用，
+ * 将 Bridge 调用次数从 O(N) 降至 O(1)，避免长列表卡顿。
  */
 export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
+  if (videos.length === 0) return;
+
+  // 1. 保存原生队列中已解析的轨道数据（包含文件 URL、cid 等）
   const nativeQueue = await TrackPlayer.getQueue();
-  const idToIndex: Map<string, number> = new Map();
-  nativeQueue.forEach((track, index) => {
-    idToIndex.set(track.id as string, index);
-  });
+  const nativeTrackMap = new Map<string, any>();
+  nativeQueue.forEach(t => nativeTrackMap.set(t.id as string, t));
 
-  const moves: { from: number; to: number }[] = [];
-  for (let i = 0; i < videos.length; i++) {
-    const bvid = videos[i].bvid;
-    const currentIndex = idToIndex.get(bvid);
-    if (currentIndex !== undefined && currentIndex !== i) {
-      moves.push({ from: currentIndex, to: i });
-    }
-  }
-
-  moves.sort((a, b) => b.from - a.from);
-  for (const move of moves) {
-    await TrackPlayer.move(move.from, move.to);
-  }
-}
-
-/**
- * Append a batch of videos to the end of the queue.
- */
-export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
-  for (const v of videos) {
-    await TrackPlayer.add({
+  // 2. 重新构建轨道列表，优先使用已解析的轨道，回退占位符
+  const tracks = videos.map(v => {
+    const existing = nativeTrackMap.get(v.bvid);
+    if (existing) return existing;
+    return {
       id: v.bvid,
       url: `placeholder://${v.bvid}`,
       title: v.title,
       artist: v.upper.name,
       artwork: v.cover,
       duration: v.duration,
-    });
+    };
+  });
+
+  // 3. 保存当前播放状态
+  const activeIndex = await TrackPlayer.getActiveTrackIndex();
+  const playbackState = await TrackPlayer.getPlaybackState();
+  const wasPlaying = playbackState.state === State.Playing;
+  const currentBvid = (typeof activeIndex === 'number' && activeIndex >= 0 && nativeQueue[activeIndex])
+    ? nativeQueue[activeIndex].id as string
+    : (startBvid ?? undefined);
+
+  // 4. O(1)：reset 清空 + 批量添加全部轨道
+  await TrackPlayer.reset();
+  await TrackPlayer.add(tracks);
+
+  // 5. 恢复播放位置
+  if (currentBvid) {
+    const skipIdx = tracks.findIndex(t => t.id === currentBvid);
+    if (skipIdx >= 0) {
+      await TrackPlayer.skip(skipIdx);
+      if (wasPlaying) {
+        await TrackPlayer.play();
+      }
+    }
   }
+}
+
+/**
+ * Append a batch of videos to the end of the queue.
+ *
+ * 性能优化：使用单次批量 add() 替代循环逐个 add()，
+ * 将 Bridge 调用次数从 O(N) 降至 O(1)。
+ */
+export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
+  if (videos.length === 0) return;
+
+  // O(1)：批量添加轨道
+  const tracks = videos.map(v => ({
+    id: v.bvid,
+    url: `placeholder://${v.bvid}`,
+    title: v.title,
+    artist: v.upper.name,
+    artwork: v.cover,
+    duration: v.duration,
+  }));
+  await TrackPlayer.add(tracks);
+
   const cur = usePlayerStore.getState();
   const combined = [...cur.queue, ...videos];
   cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
@@ -368,7 +402,7 @@ export async function PlaybackService() {
     // 保存播放进度
     if (playerState === State.Paused || playerState === State.Stopped) {
       try {
-        const progress = await TrackPlayer.getProgress();
+        const progress = useProgressStore.getState();
         if (progress.position > 0) {
           storage.setNumber('lastPlaybackPosition', progress.position);
         }

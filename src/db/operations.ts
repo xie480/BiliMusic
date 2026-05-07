@@ -151,18 +151,28 @@ export async function upsertPlaylistMeta(data: {
 }
 
 /**
- * 更新收藏夹同步游标和已同步数量
+ * 更新收藏夹同步游标和已同步数量（使用绝对数量）
  */
-export async function updatePlaylistSyncProgress(playlistId: string, cursor: string | null, syncedCountAdd: number) {
+export async function updatePlaylistSyncProgress(playlistId: string, cursor: string | null, absoluteSyncedCount: number) {
   await database.write(async writer => {
     const meta = await getPlaylistMeta(playlistId);
     if (meta) {
       await meta.update(record => {
         record.syncCursor = cursor;
-        record.localSyncedCount += syncedCountAdd;
+        record.localSyncedCount = absoluteSyncedCount;
       });
     }
   });
+}
+
+/**
+ * 获取收藏夹下有效视频的数量
+ */
+export async function getPlaylistVideoCount(playlistId: string): Promise<number> {
+  return await videoMetaCollection.query(
+    Q.where('playlist_id', playlistId),
+    Q.where('is_deleted', false)
+  ).fetchCount();
 }
 
 /**

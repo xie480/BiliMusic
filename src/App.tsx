@@ -25,6 +25,7 @@ import { LoginModal } from './components/LoginModal';
 import { storage } from './core/storage';
 import { useSyncStore } from './store/syncStore';
 import { GlassBackground } from './components/GlassBackground';
+import { startProgressPolling, stopProgressPolling } from './store/progressStore';
 
 const Stack = createStackNavigator();
 
@@ -103,9 +104,12 @@ export default function App() {
       return false;
     });
 
+    startProgressPolling();
+
     return () => {
       unsubscribe();
       backHandler.remove();
+      stopProgressPolling();
     };
   }, []);
 
@@ -155,9 +159,9 @@ export default function App() {
     // 更新记录
     prevHiddenFolderIdsRef.current = hiddenFolderIds;
 
-    // 用户修改了可见收藏夹偏好，重新构建全局索引
+    // 用户修改了可见收藏夹偏好，重新加载全局索引缓存
+    // 注意：绝不能在这里调用 clearGlobalIndex()，否则会导致增量同步退化为全量覆盖
     (async () => {
-      await favoriteService.clearGlobalIndex();
       await loadGlobalIndexCache();
     })();
     // 自动同步已移除，用户可在设置页面手动同步

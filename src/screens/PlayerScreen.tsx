@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import FastImage from 'react-native-fast-image';
-import TrackPlayer, { useActiveTrack, usePlaybackState, useProgress, State } from 'react-native-track-player';
+import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
@@ -17,6 +17,7 @@ import { netStatus } from '../services/netStatus';
 import { usePlayerStore } from '../store/playerStore';
 import { playSpecificPart } from '../services/trackPlayer';
 import { useSyncStore } from '../store/syncStore';
+import { useProgressStore } from '../store/progressStore';
 
 export const PlayerScreen = () => {
   const t = useTheme();
@@ -24,10 +25,15 @@ export const PlayerScreen = () => {
   const nav = useNavigation<any>();
   const track = useActiveTrack();
   const playback = usePlaybackState();
-  const progress = useProgress();
+  const progress = useProgressStore();
   const quality = useSettingsStore((s) => s.quality);
   // const playlistVisible = useUIStore(state => state.playlistVisible); // removed, handled globally
-  const queue = usePlayerStore((s) => s.queue);
+  // 性能优化：订阅当前正在播放的视频而非整个 queue 数组，
+  // 避免切换播放模式（shuffle/sequential）时整个播放器界面重渲染
+  const trackId = track?.id;
+  const currentVideo = usePlayerStore(
+    (s) => trackId ? s.queue.find((v) => v.bvid === trackId) : undefined
+  );
   const currentCid = usePlayerStore((s) => s.currentCid);
   const isResolving = usePlayerStore((s) => s.isResolving);
   const playMode = usePlayerStore((s) => s.playMode);
@@ -47,7 +53,6 @@ export const PlayerScreen = () => {
     );
   }
 
-  const currentVideo = queue.find((v) => v.bvid === track.id);
   const hasMultiParts = currentVideo?.parts && currentVideo.parts.length > 1;
   const currentPart = currentVideo?.parts?.find((p) => p.cid === currentCid);
 
