@@ -57,7 +57,7 @@ export const PlayerScreen = () => {
   const currentPart = currentVideo?.parts?.find((p) => p.cid === currentCid);
 
   const isLocal = String(track.url || '').startsWith('file://');
-  const qualityText = { low: '64K', medium: '132K', high: '192K' }[quality];
+  const qualityText = { low: '64K', medium: '132K', high: '192K', dolby: '杜比全景声', hires: 'Hi-Res' }[quality];
   const sourceText = isLocal ? '本地缓存' : netStatus.type === 'wifi' ? 'WiFi' : '移动数据';
 
   // 玻璃主题专用颜色
