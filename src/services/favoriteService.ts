@@ -27,6 +27,7 @@ import { database, videoMetaCollection } from '../db/database';
 import { Q } from '@nozbe/watermelondb';
 import { Mutex } from '../utils/mutex';
 import { AuthRequiredError } from '../core/errors';
+import LoggerService from './LoggerService';
 import type { VideoMeta } from '../db/models/VideoMeta';
 
 export interface SyncProgressEvent {
@@ -407,7 +408,7 @@ export const favoriteService = {
           }
 
         } catch (err: any) {
-          console.warn(`[favoriteService] 文件夹 ${folder.id} 同步异常:`, err.message);
+          LoggerService.warn('favoriteService', 'syncPlaylist', `文件夹 ${folder.id} 同步异常:`, err.message);
           await finishSyncJob(jobId, 'failed', err.message);
           await upsertPlaylistMeta({ playlistId, remoteVideoCount: folder.mediaCount, syncStatus: 'failed' });
           if (err instanceof AuthRequiredError) {

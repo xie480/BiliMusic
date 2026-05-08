@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
+import LoggerService from '../services/LoggerService';
 import { audioDSP } from '../native/AudioDSPModule';
 
 /** 轮询间隔（毫秒） */
@@ -108,17 +109,19 @@ export function useSpectrumPoller(enabled: boolean = true): SpectrumData {
         });
 
         if (DEBUG) {
-          console.log(
-            `[useSpectrumPoller] spectrum=${smoothedSpectrum.length} bins, ` +
+          LoggerService.debug(
+            'useSpectrumPoller',
+            'poll',
+            `spectrum=${smoothedSpectrum.length} bins, ` +
             `left=${smoothedLeft.length} bins, right=${smoothedRight.length} bins`,
           );
         }
       } else if (DEBUG) {
-        console.warn('[useSpectrumPoller] Native getSpectrumData() returned empty data');
+        LoggerService.warn('useSpectrumPoller', 'poll', 'Native getSpectrumData() returned empty data');
       }
     } catch (e) {
       if (DEBUG) {
-        console.warn('[useSpectrumPoller] Native module error:', e);
+        LoggerService.warn('useSpectrumPoller', 'poll', 'Native module error:', e);
       }
     }
   }, []);

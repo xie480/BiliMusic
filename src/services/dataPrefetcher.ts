@@ -16,6 +16,7 @@
 
 import TrackPlayer from 'react-native-track-player';
 import { InteractionManager } from 'react-native';
+import LoggerService from './LoggerService';
 import { audioService } from './audioService';
 import { useSettingsStore } from '../store/settingsStore';
 import { netStatus } from './netStatus';
@@ -68,8 +69,8 @@ async function prefetchResolve(index: number): Promise<void> {
       },
       cid ?? info.cid,
     );
-  } catch {
-    // 预加载静默失败，不影响主流程
+  } catch (error) {
+    LoggerService.debug('dataPrefetcher', 'prefetchResolve', '预取音频 URL 失败:', error);
   }
 }
 
@@ -130,7 +131,7 @@ export async function prefetchAudioUrl(bvid: string, cid?: number): Promise<void
       },
       cid ?? info.cid,
     );
-  } catch {
-    // 忽略
+  } catch (error) {
+    LoggerService.debug('dataPrefetcher', 'prefetchAudioUrl', '主动预取音频 URL 失败:', error);
   }
 }

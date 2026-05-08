@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { cookieService } from '../services';
 import { biliApi } from '../services/biliApi';
+import LoggerService from '../services/LoggerService';
 
 type UserInfo = {
   uid: string;
@@ -69,7 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isVip,
         });
       } catch (e) {
-        console.error('initAuth failed', e);
+        LoggerService.error('authStore', 'initAuth', 'initAuth failed', e);
         set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
       }
     } else {
@@ -90,7 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isVip,
       });
     } catch (e) {
-      console.error('login fetch user info failed', e);
+      LoggerService.error('authStore', 'login', 'login fetch user info failed', e);
     }
     const resolver = get().loginResolver;
     if (resolver) {

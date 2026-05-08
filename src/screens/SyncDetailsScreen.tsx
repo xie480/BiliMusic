@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
+import LoggerService from '../services/LoggerService';
 import { Header } from '../components/Header';
 import { useTheme } from '../theme';
 import { favoriteService } from '../services/favoriteService';
@@ -64,7 +65,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
       }));
       setFoldersInfo(info);
     } catch (e) {
-      console.error('Failed to load sync details', e);
+      LoggerService.error('SyncDetailsScreen', 'loadData', 'Failed to load sync details', e);
     } finally {
       setLoading(false);
     }
@@ -103,7 +104,7 @@ export const SyncDetailsScreen = ({ navigation }: any) => {
               setIsMultiSelectMode(false);
               await loadData();
             } catch (e) {
-              console.error('Failed to delete folder index', e);
+              LoggerService.error('SyncDetailsScreen', 'handleDelete', 'Failed to delete folder index', e);
               Alert.alert('错误', '删除失败');
               setLoading(false);
             }

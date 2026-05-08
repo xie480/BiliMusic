@@ -8,6 +8,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, StyleSheet, useColorScheme, Alert, Platform, ToastAndroid, BackHandler, PermissionsAndroid, StatusBar } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, useTheme } from './theme';
+import LoggerService from './services/LoggerService';
+import ToastNotification, { ToastNotificationRef, ToastConfig } from './components/ToastNotification';
 import { setupPlayer } from './services/trackPlayer';
 import { netStatus } from './services/netStatus';
 import { HomeScreen } from './screens/HomeScreen';
@@ -77,6 +79,7 @@ export default function App() {
   const isDark = themeMode === 'system' ? systemScheme === 'dark' : (themeMode === 'dark' || themeMode === 'glass-dark');
   const baseBgColor = isDark ? '#0F0F11' : '#FFFFFF';
   
+  const toastRef = useRef<ToastNotificationRef>(null);
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
   const loggedIn = useAuthStore((s) => s.loggedIn);
@@ -99,11 +102,20 @@ export default function App() {
   // 记录上一次的 hiddenFolderIds，用于检测变化
   const prevHiddenFolderIdsRef = useRef<number[]>(hiddenFolderIds);
 
-  // Initialize player, network status listener, and back handler
+  // Initialize player, network status listener, back handler, and Logger
   useEffect(() => {
     if (Platform.OS === 'android' && Platform.Version >= 33) {
       PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
     }
+
+    // 初始化全局日志服务，并绑定 Toast 通知回调
+    LoggerService.init((level, message) => {
+      toastRef.current?.show({
+        type: level === 'ERROR' ? 'error' : 'warn',
+        message,
+      });
+    });
+
     initAuth();
     setupPlayer();
     netStatus.init();
@@ -225,6 +237,8 @@ export default function App() {
               </Stack.Navigator>
             </NavigationContainer>
           </SafeAreaWrapper>
+          {/* 全局顶部通知组件 - 覆盖在所有页面之上 */}
+          <ToastNotification ref={toastRef} />
           <PlaylistPanel visible={playlistVisible} onClose={() => setPlaylistVisible(false)} />
           <LoginModal />
         </ThemeProvider>

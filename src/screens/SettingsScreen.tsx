@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, StatusBar, Image, Dimensions, Linking } from 'react-native';
+import { View, StatusBar, Image, Dimensions, Linking, Alert, Platform, ToastAndroid } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Text, ScrollView, StyleSheet,
@@ -9,6 +9,7 @@ import { Dialog } from '../components/Dialog';
 import { ListItem } from '../components/ListItem';
 import { Switch } from '../components/Switch';
 import { Button } from '../components/Button';
+import LoggerService from '../services/LoggerService';
 import { useSettingsStore } from '../store/settingsStore';
 import type { ThemeMode } from '../store/settingsStore';
 // Removed useUserStore - authentication now handled by authStore
@@ -425,7 +426,8 @@ export const SettingsScreen = ({ navigation }: any) => {
                 />
               </View>
               <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                由于B站限流严重，该操作可能耗时较长，请耐心等待
+                · 由于B站限流严重，该操作可能耗时较长，请耐心等待
+                · 最终结果可能与显示的总数量存在差距，这是因为存在已失效的视频
               </Text>
             </View>
           )}
@@ -449,6 +451,49 @@ export const SettingsScreen = ({ navigation }: any) => {
           />
         </View>
 
+
+        <Text style={s.section}>日志</Text>
+        <View style={s.group}>
+          <ListItem
+            title="导出运行日志"
+            subtitle="将应用运行期间的日志导出为文件进行查看"
+            onPress={async () => {
+              const success = await LoggerService.exportLogs();
+              if (!success) {
+                const msg = '暂无日志数据可导出';
+                if (Platform.OS === 'android') {
+                  ToastAndroid.show(msg, ToastAndroid.SHORT);
+                } else {
+                  Alert.alert('提示', msg);
+                }
+              }
+            }}
+            showArrow
+          />
+          <View style={s.sep} />
+          <ListItem
+            title="删除日志文件"
+            subtitle="清除本地存储的所有历史日志记录"
+            onPress={() => {
+              showDialog('确认删除', '确定要删除所有本地日志文件吗？\n此操作不可恢复。', [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '删除', style: 'destructive',
+                  onPress: async () => {
+                    await LoggerService.clearLogs();
+                    const msg = '日志文件已删除';
+                    if (Platform.OS === 'android') {
+                      ToastAndroid.show(msg, ToastAndroid.SHORT);
+                    } else {
+                      Alert.alert('提示', msg);
+                    }
+                  },
+                },
+              ]);
+            }}
+            right={<Text style={s.danger}>删除</Text>}
+          />
+        </View>
 
         <Text style={s.section}>关于</Text>
         <View style={s.group}>

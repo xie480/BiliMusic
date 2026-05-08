@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { config } from '../config';
 import { cookieService } from '../services';
 import { adaptiveBucket } from './adaptiveRateLimit';
+import LoggerService from '../services/LoggerService';
 import {
   AuthRequiredError, BiliApiError, normalizeError,
   ResourceUnavailableError, RateLimitError,
@@ -32,18 +33,20 @@ function createInstance(): AxiosInstance {
       if (__DEV__) {
         const sessMatch = cookie.match(/SESSDATA=([^;]+)/);
         const sessLen = sessMatch ? sessMatch[1].length : 0;
-        console.log(
-          '[http] Cookie len=' + cookie.length +
+        LoggerService.info(
+          'http',
+          'requestInterceptor',
+          'Cookie len=' + cookie.length +
           ', SESSDATA len=' + sessLen +
           ', preview=' + cookie.substring(0, 80)
         );
         // 若 SESSDATA 异常短小（< 50 字符），直接输出完整 Cookie 以便排查截断
         if (sessLen > 0 && sessLen < 50) {
-          console.warn('[http] SESSDATA 可能被截断！完整 Cookie:', cookie);
+          LoggerService.warn('http', 'requestInterceptor', 'SESSDATA 可能被截断！完整 Cookie:', cookie);
         }
       }
     } else if (__DEV__) {
-      console.warn('[http] 未检测到 Cookie，请求可能缺乏鉴权');
+      LoggerService.warn('http', 'requestInterceptor', '未检测到 Cookie，请求可能缺乏鉴权');
     }
     return cfg;
   });

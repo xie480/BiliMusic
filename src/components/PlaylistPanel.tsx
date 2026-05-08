@@ -31,6 +31,10 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const [expandedBvid, setExpandedBvid] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const listRef = useRef<any>(null);
+  // 用于精确判断自动滚动触发时机，拦截分页加载时的无意识滚动
+  const prevVisibleRef = useRef(visible);
+  const prevBvidRef = useRef(currentBvid);
+  const prevPlayModeRef = useRef(playMode);
 
   const initialIndex = React.useMemo(() => {
     if (currentBvid && queue.length > 0) {
@@ -138,9 +142,26 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
     [t.colors, expandedBvid, handlePress, handlePartPress, currentBvid]
   );
 
-  // 当播放模式切换（队列重排）或当前歌曲变化时，自动平滑滚动到当前播放歌曲位置
+  // 精确控制的自动滚动逻辑：
+  // - 仅在面板刚打开、当前播放歌曲切换、或播放模式切换（队列重排）时触发
+  // - 严格拦截因分页加载（queue 末尾追加）导致的滚动跳转，保持用户浏览视野不变
   useEffect(() => {
-    if (visible && currentBvid && queue.length > 0) {
+    const prevVisible = prevVisibleRef.current;
+    const prevBvid = prevBvidRef.current;
+    const prevPlayMode = prevPlayModeRef.current;
+
+    // 更新 ref 为当前值
+    prevVisibleRef.current = visible;
+    prevBvidRef.current = currentBvid;
+    prevPlayModeRef.current = playMode;
+
+    // 判断是否是合法的自动定位触发场景
+    const shouldScroll =
+      (!prevVisible && visible)   // 1) 面板从关闭变为打开
+      || (prevBvid !== currentBvid) // 2) 播放歌曲切换
+      || (prevPlayMode !== playMode); // 3) 播放模式切换（队列重排）
+
+    if (shouldScroll && visible && currentBvid && queue.length > 0) {
       const idx = queue.findIndex(v => v.bvid === currentBvid);
       if (idx >= 0) {
         const timer = setTimeout(() => {
@@ -153,7 +174,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
         return () => clearTimeout(timer);
       }
     }
-  }, [queue, currentBvid, visible]);
+  }, [queue, currentBvid, visible, playMode]);
 
   const handleScrollToIndexFailed = useCallback((info: any) => {
     const timer = setTimeout(() => {
@@ -189,6 +210,17 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       setLoadingMore(false);
     }
   }, [loadingMore, playContext, appendQueue]);
+
+  // 列表底部加载指示器：仅在分页请求进行中（loadingMore）时渲染
+  const renderFooter = useCallback(() => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator size="small" color={t.colors.primary} />
+        <Text style={[styles.footerText, { color: t.colors.textSub }]}>加载更多…</Text>
+      </View>
+    );
+  }, [loadingMore, t.colors]);
 
   const isGlass = !!t.glass;
 
@@ -226,6 +258,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
           windowSize={5}
           removeClippedSubviews={true}
           showsVerticalScrollIndicator={false}
+          ListFooterComponent={renderFooter}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
         />
@@ -330,6 +363,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#555',
+  },
+  footerLoader: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  footerText: {
+    marginLeft: 8,
+    fontSize: 13,
   },
   partDuration: {
     fontSize: 11,

@@ -1,3 +1,4 @@
+import LoggerService from '../services/LoggerService';
 import { clearAllData } from './operations';
 
 /**
@@ -7,11 +8,11 @@ import { clearAllData } from './operations';
  */
 export async function migrateToV2(): Promise<void> {
   try {
-    console.log('[migrate] 开始执行 V2 数据库迁移/清理...');
+    LoggerService.info('migrate', 'migrateToV2', '开始执行 V2 数据库迁移/清理...');
     // 清除所有新表数据，确保干净的状态
     await clearAllData();
-    console.log('[migrate] V2 数据库清理完成，等待重新同步。');
+    LoggerService.info('migrate', 'migrateToV2', 'V2 数据库清理完成，等待重新同步。');
   } catch (error) {
-    console.error('[migrate] V2 数据库迁移失败:', error);
+    LoggerService.error('migrate', 'migrateToV2', 'V2 数据库迁移失败:', error);
   }
 }

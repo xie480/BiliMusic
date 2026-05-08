@@ -2,6 +2,7 @@ import TrackPlayer, {
   AppKilledPlaybackBehavior, Capability, Event,
 } from 'react-native-track-player';
 import { AppState } from 'react-native';
+import LoggerService from './LoggerService';
 import { audioService } from './audioService';
 import { audioCache } from './audioCache';
 import { netStatus } from './netStatus';
@@ -105,7 +106,7 @@ export async function setupPlayer() {
     }
 
   } catch (e) {
-    console.error('[TrackPlayer] setupPlayer error:', e);
+    LoggerService.error('TrackPlayer', 'setupPlayer', 'setupPlayer error:', e);
   }
   // 【修复D】重置 _pendingPlay，防止从之前的状态泄露
   _pendingPlay = false;
@@ -346,7 +347,7 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
         // URL 内存缓存命中！跳过 API 请求，直接使用缓存 URL
         url = cachedUrlEntry.url;
         headers = cachedUrlEntry.headers;
-        console.log(`[TrackPlayer] URL 缓存命中 (BVID: ${bvid}, CID: ${cid})，跳过 API 解析`);
+        LoggerService.info('TrackPlayer', 'lazyResolve', `URL 缓存命中 (BVID: ${bvid}, CID: ${cid})，跳过 API 解析`);
       } else {
         // ======== 缓存未命中，走完整 API 解析流程 ========
         // 【新增】音频解析重试机制：最多重试 3 次，应对瞬时网络波动或临时限流
@@ -375,10 +376,10 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
             lastError = error;
             // 【新增】检测到限流立即停止重试，避免触发更严格的风控
             if (error instanceof RateLimitError) {
-              console.warn(`[TrackPlayer] 检测到 API 限流 (BVID: ${bvid})，停止重试`);
+              LoggerService.warn('TrackPlayer', 'lazyResolve', `检测到 API 限流 (BVID: ${bvid})，停止重试`);
               break;
             }
-            console.warn(`[TrackPlayer] 第 ${attempt} 次解析音频失败 (BVID: ${bvid}):`, error);
+            LoggerService.warn('TrackPlayer', 'lazyResolve', `第 ${attempt} 次解析音频失败 (BVID: ${bvid}):`, error);
             if (attempt < 3) await new Promise(r => setTimeout(r, 500));
           }
         }
@@ -402,7 +403,7 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
         // 下次冷启动时 buildPlaceholderTrack 可直接从 DB 读取 parts 并注入 cid，
         // 使 lazyResolve 跳过首次 videoInfo 请求，减少 1 RTT。
         persistVideoPartsToDb(bvid, parts).catch((err) => {
-          console.warn(`[TrackPlayer] 持久化分P信息失败 (BVID: ${bvid}):`, err);
+          LoggerService.warn('TrackPlayer', 'lazyResolve', `持久化分P信息失败 (BVID: ${bvid}):`, err);
         });
         // 仅当用户开启"将分P列表加入播放列表"时才展开后续分P
         if (useSettingsStore.getState().expandMultiPart) {
@@ -472,11 +473,11 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       }
     }
   } catch (error) {
-    console.error(`[TrackPlayer] 解析音频失败 (BVID: ${bvid}):`, error);
+    LoggerService.error('TrackPlayer', 'lazyResolve', `解析音频失败 (BVID: ${bvid}):`, error);
     
     // 检查网络状态，如果是无网导致的失败，停止播放并避免切歌风暴
     if (netStatus.type === 'none' || netStatus.type === 'unknown') {
-      console.warn('[TrackPlayer] 无网络连接，停止解析队列');
+      LoggerService.warn('TrackPlayer', 'lazyResolve', '无网络连接，停止解析队列');
       await TrackPlayer.pause();
       // 通过 Zustand store 触发全局 UI 错误提示
       usePlayerStore.getState().setPlaybackError('无网络连接，无法加载音频');
@@ -485,7 +486,7 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
 
     // 【新增】限流熔断：检测到 RateLimitError，立即停止播放并报错，不重试也不切歌
     if (error instanceof RateLimitError) {
-      console.warn('[TrackPlayer] 触发限流熔断，暂停播放');
+      LoggerService.warn('TrackPlayer', 'lazyResolve', '触发限流熔断，暂停播放');
       await TrackPlayer.pause();
       usePlayerStore.getState().setPlaybackError('B站接口限流，请稍后再试');
       consecutiveTrackFailures = 0;
@@ -495,7 +496,7 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
     // 【新增】连续失败熔断：连续 3 首歌解析失败则暂停播放，防止无限切歌风暴
     consecutiveTrackFailures++;
     if (consecutiveTrackFailures >= 3) {
-      console.warn('[TrackPlayer] 连续 3 首歌解析失败，触发熔断，暂停播放');
+      LoggerService.warn('TrackPlayer', 'lazyResolve', '连续 3 首歌解析失败，触发熔断，暂停播放');
       await TrackPlayer.pause();
       usePlayerStore.getState().setPlaybackError('连续多首歌曲加载失败，请检查网络或账号状态');
       consecutiveTrackFailures = 0;
@@ -616,7 +617,7 @@ export async function PlaybackService() {
       const queue = await TrackPlayer.getQueue();
       const activeTrack = typeof activeIndex === 'number' ? queue[activeIndex] : undefined;
       if (activeTrack && typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')) {
-        console.log('[TrackPlayer] Ignoring placeholder track playback error, will auto-resume after resolve');
+        LoggerService.info('TrackPlayer', 'PlaybackError', 'Ignoring placeholder track playback error, will auto-resume after resolve');
         // 设置自动恢复标志，等待 lazyResolve 完成后恢复播放
         _pendingAutoPlayAfterResolve = true;
         // 主动触发解析（带 autoPlayActive=true）；若已在解析中则防并发，
@@ -636,7 +637,7 @@ export async function PlaybackService() {
       // If inspection fails, proceed with generic error handling.
     }
     
-    console.error('[TrackPlayer] 播放错误:', error);
+    LoggerService.error('TrackPlayer', 'PlaybackError', '播放错误:', error);
     
     // 【修复】如果当前无网络，暂停播放而不是跳过
     if (netStatus.type === 'none') {

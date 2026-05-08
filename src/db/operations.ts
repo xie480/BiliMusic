@@ -355,6 +355,6 @@ export async function persistVideoPartsToDb(bvid: string, parts: VideoPart[]): P
         v.extraJson = JSON.stringify(parts);
       })
     );
-    await writer.batch(updates);
+    await writer.batch(...updates);
   });
 }

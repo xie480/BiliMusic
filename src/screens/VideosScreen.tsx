@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
+import LoggerService from '../services/LoggerService';
 import {
   View,
   FlatList,
@@ -243,7 +244,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         await tpAppendQueue(newItems, playerStore.currentBvid ?? undefined);
       }
     } catch (e) {
-      console.error('[VideosScreen] 后台加载播放队列失败:', e);
+      LoggerService.error('VideosScreen', 'loadQueueInBackground', '后台加载播放队列失败:', e);
     } finally {
       // 【性能优化】通过 InteractionManager 延迟队列加载状态的清理，
       // 避免在页面切换动画期间抢占主线程

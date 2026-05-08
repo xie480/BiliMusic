@@ -1,5 +1,6 @@
 import RNFS from 'react-native-fs';
 import { storage } from '../core/storage';
+import LoggerService from './LoggerService';
 import type { Quality } from '../types/domain';
 
 const CACHE_DIR = `${RNFS.DocumentDirectoryPath}/audio_cache`;
@@ -105,7 +106,7 @@ class AudioCache {
             await RNFS.unlink(filePath);
           }
         } catch (cleanupError) {
-          console.error('清理残余缓存文件失败:', cleanupError);
+          LoggerService.error('audioCache', 'download', '清理残余缓存文件失败:', cleanupError);
         }
         throw error;
       } finally {

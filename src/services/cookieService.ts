@@ -1,5 +1,6 @@
 import * as Keychain from 'react-native-keychain';
 import { cache } from '../core/cache';
+import LoggerService from './LoggerService';
 
 // Keychain service identifier for B 站鉴权 Cookie
 const COOKIE_SERVICE = 'bili_auth_cookie';
@@ -40,7 +41,7 @@ export const cookieService = {
         return credentials.password;
       }
     } catch (e) {
-      console.error('读取 Keychain Cookie 失败', e);
+      LoggerService.error('cookieService', 'get', '读取 Keychain Cookie 失败', e);
     }
     return '';
   },
@@ -50,7 +51,7 @@ export const cookieService = {
     try {
       await Keychain.resetGenericPassword({ service: COOKIE_SERVICE });
     } catch (e) {
-      console.error('清除 Keychain Cookie 失败', e);
+      LoggerService.error('cookieService', 'clear', '清除 Keychain Cookie 失败', e);
     }
     cache.deletePrefix('folders:');
     cache.deletePrefix('videos:');

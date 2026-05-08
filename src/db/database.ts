@@ -1,5 +1,6 @@
 import { Database } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
+import LoggerService from '../services/LoggerService';
 
 import { schema } from './schema';
 import migrations from './migrations';
@@ -12,7 +13,7 @@ const adapter = new SQLiteAdapter({
   migrations,
   // jsi: true, // 可选启用 JSI 加速，需安装 react-native-quick-sqlite
   onSetUpError: (error) => {
-    console.error('[DB] Setup error:', error);
+    LoggerService.error('DB', 'database', 'Setup error:', error);
   },
 });
 

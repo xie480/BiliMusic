@@ -1,3 +1,5 @@
+import LoggerService from '../services/LoggerService';
+
 export type TaskPriority = 'high' | 'normal' | 'low';
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = {
@@ -63,7 +65,7 @@ export class TaskQueue {
     try {
       await task.execute();
     } catch (e) {
-      console.warn(`[TaskQueue] Task failed:`, e);
+      LoggerService.warn('TaskQueue', 'process', 'Task failed:', e);
     }
     this.running--;
     this.process();

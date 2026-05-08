@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { Modal, SafeAreaView } from 'react-native';
 import { WebView } from 'react-native-webview';
 import CookieManager from '@react-native-cookies/cookies';
+import LoggerService from '../services/LoggerService';
 import { useAuthStore } from '../store/authStore';
 import { useUIStore } from '../store/uiStore';
 import { cookieService } from '../services';
@@ -34,10 +35,10 @@ export const LoginModal = () => {
       if (__DEV__) {
         const sessMatch = cookieStr.match(/SESSDATA=([^;]+)/);
         const sessLen = sessMatch ? sessMatch[1].length : 0;
-        console.log('[LoginModal] 获取到 Cookie 字段:', Object.keys(rawCookies).join(', '));
-        console.log('[LoginModal] Cookie 总长度:', cookieStr.length, ', SESSDATA 长度:', sessLen);
+        LoggerService.info('LoginModal', 'handleNavigationStateChange', '获取到 Cookie 字段:', Object.keys(rawCookies).join(', '));
+        LoggerService.info('LoginModal', 'handleNavigationStateChange', 'Cookie 总长度:', cookieStr.length, ', SESSDATA 长度:', sessLen);
         if (sessLen > 0 && sessLen < 50) {
-          console.warn('[LoginModal] SESSDATA 异常短小！完整 Cookie:', cookieStr);
+          LoggerService.warn('LoginModal', 'handleNavigationStateChange', 'SESSDATA 异常短小！完整 Cookie:', cookieStr);
         }
       }
       // 保存 Cookie 到安全存储
