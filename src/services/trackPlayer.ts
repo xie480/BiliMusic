@@ -316,10 +316,13 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
   let isActiveTrack = false;
   try {
     const activeIdx = await TrackPlayer.getActiveTrackIndex();
-    if (activeIdx === index) {
-      isActiveTrack = true;
-      usePlayerStore.getState().setResolving(true);
+    // 【修复三】阻断非当前活跃轨道的解析
+    // 解决 loadQueue 时首个音频的错误并发加载，以及快速切歌导致的资源浪费
+    if (activeIdx !== index) {
+      return;
     }
+    isActiveTrack = true;
+    usePlayerStore.getState().setResolving(true);
     const queue = await TrackPlayer.getQueue();
     const t = queue[index];
     if (!t || !String(t.url).startsWith('placeholder://')) return;
@@ -453,12 +456,18 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       // 当前播放的就是占位符 → 需要在占位符后插入真实轨道，跳过去，再删除占位符
       // 这虽然会触发一次 PlaybackActiveTrackChanged，但不会产生级联（事件处理器不再自动预加载）
       await TrackPlayer.add(newTrack, actualIndex + 1);
+      // 【修复一】记录 skip 前的播放状态，防止 skip 操作底层自动恢复播放
+      const playbackState = await TrackPlayer.getPlaybackState();
+      const isPlaying = playbackState.state === State.Playing || playbackState.state === State.Buffering;
       await TrackPlayer.skip(actualIndex + 1);
       // 也检查 _pendingAutoPlayAfterResolve：PlaybackError 检测到占位符错误时设置的标志
-      const shouldPlay = autoPlayActive || _pendingAutoPlayAfterResolve;
+      const shouldPlay = autoPlayActive || _pendingAutoPlayAfterResolve || isPlaying;
       if (_pendingAutoPlayAfterResolve) _pendingAutoPlayAfterResolve = false;
       if (shouldPlay) {
         await TrackPlayer.play();
+      } else {
+        // 【修复一】明确调用 pause，防止 skip 引起的自动播放，确保启动时保持暂停
+        await TrackPlayer.pause();
       }
       await TrackPlayer.remove(actualIndex);
     } else {
@@ -536,8 +545,15 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
   TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
   TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
-  TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
-  TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
+  // 【修复二】锁屏/通知栏切歌时同步触发播放，暂停状态下切歌自动恢复播放
+  TrackPlayer.addEventListener(Event.RemoteNext, async () => {
+    await TrackPlayer.skipToNext();
+    await TrackPlayer.play();
+  });
+  TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
+    await TrackPlayer.skipToPrevious();
+    await TrackPlayer.play();
+  });
   TrackPlayer.addEventListener(Event.RemoteSeek, ({ position }) =>
     TrackPlayer.seekTo(position)
   );

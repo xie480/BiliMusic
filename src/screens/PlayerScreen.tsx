@@ -242,7 +242,7 @@ export const PlayerScreen = () => {
             </View>
           </View>
           <View style={s.controls}>
-            <IconButton name="skip-previous" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToPrevious()} />
+            <IconButton name="skip-previous" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={async () => { await TrackPlayer.skipToPrevious(); await TrackPlayer.play(); }} />
             <View style={s.playBtn}>
               {(isBuffering || isResolving) ? (
                 <ActivityIndicator size="large" color={playTextColor} />
@@ -250,7 +250,7 @@ export const PlayerScreen = () => {
                 <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : TrackPlayer.play())} />
               )}
             </View>
-            <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={() => TrackPlayer.skipToNext()} />
+            <IconButton name="skip-next" size={36} color={isGlass ? textPrimary : t.colors.text} onPress={async () => { await TrackPlayer.skipToNext(); await TrackPlayer.play(); }} />
           </View>
           <View style={s.bottomBar}>
             <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text} onPress={() => useUIStore.getState().setPlaylistVisible(true)} />

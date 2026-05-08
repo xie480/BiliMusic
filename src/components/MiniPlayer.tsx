@@ -92,7 +92,7 @@ export const MiniPlayer: React.FC = () => {
             />
           )}
           <IconButton name="skip-next" size={26} color={t.colors.text}
-                      onPress={() => TrackPlayer.skipToNext()} />
+                      onPress={async () => { await TrackPlayer.skipToNext(); await TrackPlayer.play(); }} />
           <IconButton name="playlist-music" size={24} color={t.colors.text}
                       onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>

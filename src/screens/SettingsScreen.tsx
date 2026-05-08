@@ -426,8 +426,9 @@ export const SettingsScreen = ({ navigation }: any) => {
                 />
               </View>
               <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                · 由于B站限流严重，该操作可能耗时较长，请耐心等待
-                · 最终结果可能与显示的总数量存在差距，这是因为存在已失效的视频
+                · B站限流可能导致同步较慢，请耐心等待
+                · 建议在WIFI环境下完成同步，避免中途停止
+                · 最终结果可能因失效视频与总数存在差异
               </Text>
             </View>
           )}
