@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, memo } from 'react';
 import {
   View,
   FlatList,
@@ -11,6 +11,7 @@ import {
   ToastAndroid,
   Modal,
   TextInput,
+  InteractionManager,
 } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -24,7 +25,7 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue, insertNext } from '../services/trackPlayer';
+import { loadQueue, insertNext, appendQueue as tpAppendQueue } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
@@ -32,6 +33,88 @@ import { useSyncStore } from '../store/syncStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FavoriteVideo } from '../types/domain';
 import { useFolderDataStore, SortOption } from '../store/folderDataStore';
+
+// ========== 精细粒度的 Item 组件（React.memo 消除无关重渲染） ==========
+interface VideoItemProps {
+  item: FavoriteVideo;
+  index: number;
+  onPlay: (index: number) => void;
+  onMenu: (item: FavoriteVideo) => void;
+  coverColor: string;
+  textColor: string;
+  textHintColor: string;
+  surfaceHighColor: string;
+  fontSizeBase: number;
+  fontSizeSm: number;
+  spacingSm: number;
+  spacingMd: number;
+  spacingLg: number;
+}
+
+const VideoItem = memo(function VideoItem({
+  item, index, onPlay, onMenu,
+  coverColor, textColor, textHintColor, surfaceHighColor,
+  fontSizeBase, fontSizeSm, spacingSm, spacingMd, spacingLg,
+}: VideoItemProps) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: spacingSm,
+        paddingHorizontal: spacingLg,
+      }}
+      onPress={() => onPlay(index)}
+    >
+      <FastImage
+        source={{ uri: item.cover }}
+        style={{
+          width: 60,
+          height: 60,
+          borderRadius: 8,
+          backgroundColor: surfaceHighColor,
+        }}
+        resizeMode={FastImage.resizeMode.cover}
+      />
+      <View style={{ flex: 1, marginLeft: spacingMd }}>
+        <Text
+          style={{
+            fontSize: fontSizeBase,
+            color: textColor,
+            fontWeight: '500',
+            marginBottom: spacingSm / 2,
+          }}
+          numberOfLines={2}
+        >
+          {item.title}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text
+            style={{
+              fontSize: fontSizeSm,
+              color: textHintColor,
+              flex: 1,
+            }}
+            numberOfLines={1}
+          >
+            {item.upper.name}
+          </Text>
+          <Text style={{ fontSize: fontSizeSm, color: textHintColor, marginLeft: spacingSm }}>
+            {formatDuration(item.duration)}
+          </Text>
+        </View>
+      </View>
+      <IconButton
+        name="dots-vertical"
+        size={24}
+        color={textColor}
+        onPress={() => onMenu(item)}
+      />
+    </TouchableOpacity>
+  );
+});
+// ========== Item 组件结束 ==========
 
 export const VideosScreen = ({ route, navigation }: any) => {
   const t = useTheme();
@@ -65,67 +148,84 @@ export const VideosScreen = ({ route, navigation }: any) => {
   const isGlobalIndexEmpty = globalIndex.length === 0;
   const isSearchDisabled = isSyncing || isGlobalIndexEmpty;
 
+  // 【性能优化】mountedRef：防止页面卸载后的异步操作更新已卸载组件的状态
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
+
   useEffect(() => {
     setIniting(true);
     initFolder(mediaId);
     // Give it a small delay to show loading state if needed, or just set false after init
-    setTimeout(() => setIniting(false), 100);
+    const timer = setTimeout(() => {
+      if (mountedRef.current) setIniting(false);
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [mediaId, initFolder]);
 
-  const ensureAllLoaded = async () => {
-    let currentHasMore = useFolderDataStore.getState().hasMore;
-    while (currentHasMore) {
-      await useFolderDataStore.getState().loadMore();
-      currentHasMore = useFolderDataStore.getState().hasMore;
-    }
-  };
+  const MAX_QUEUE_SIZE = 200;
 
   const displayedList = getDisplayedList();
 
-  const playFrom = async (idx: number) => {
+  /** 后台异步加载更多分页数据并追加到播放队列尾部 */
+  const loadMoreInBackground = useCallback(async () => {
+    try {
+      const store = useFolderDataStore.getState();
+      let currentList = store.getDisplayedList();
+      while (currentList.length < MAX_QUEUE_SIZE && store.hasMore) {
+        await store.loadMore();
+        const newState = useFolderDataStore.getState();
+        currentList = newState.getDisplayedList();
+      }
+      // 【性能优化】页面卸载后跳过队列追加操作
+      if (!mountedRef.current) return;
+      const fullList = useFolderDataStore.getState().getDisplayedList();
+      const playerStore = usePlayerStore.getState();
+      const existingBvids = new Set(playerStore.queue.map(v => v.bvid));
+      const newItems = fullList.filter(v => !existingBvids.has(v.bvid));
+      if (newItems.length > 0) {
+        await tpAppendQueue(newItems, playerStore.currentBvid ?? undefined);
+      }
+    } catch (e) {
+      console.error('[VideosScreen] 后台加载播放队列失败:', e);
+    } finally {
+      // 【性能优化】通过 InteractionManager 延迟队列加载状态的清理，
+      // 避免在页面切换动画期间抢占主线程
+      InteractionManager.runAfterInteractions(() => {
+        usePlayerStore.getState().setQueueLoading(false);
+      });
+    }
+  }, []);
+
+  const playFrom = useCallback(async (idx: number) => {
     try {
       const target = displayedList[idx];
+      if (!target) return;
       const context = { folderId: mediaId, sortOption, searchQuery };
-      
-      // 搜索状态下：强制加载全部匹配数据，严格按照搜索结果从上到下顺序播放
-      if (searchQuery.trim().length > 0) {
-        if (hasMore) await ensureAllLoaded();
-        const fullList = useFolderDataStore.getState().getDisplayedList();
-        setQueue(fullList, target.bvid, context);
-        await loadQueue(fullList, target.bvid);
-      } else if (playMode === 'shuffle') {
-        // 拦截手动点歌：在随机模式下重新洗牌并将点击歌曲置顶
-        if (hasMore) await ensureAllLoaded();
-        const fullList = useFolderDataStore.getState().getDisplayedList();
-        const targetIndex = fullList.findIndex(v => v.bvid === target.bvid);
-        
-        // 【修复 originalQueue 被覆盖】
-        // 1. 先用完整列表调用 setQueue → 正确初始化 originalQueue = fullList
-        setQueue(fullList, target.bvid, context);
-        
-        // 2. 对完整列表进行 Fisher-Yates 洗牌
-        let shuffled = [...fullList];
-        if (targetIndex !== -1) {
-          shuffled.splice(targetIndex, 1);
-        }
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        shuffled.unshift(target);
-        
-        // 3. 仅更新 queue 字段，保留 originalQueue 不变
-        usePlayerStore.setState({ queue: shuffled });
-        await loadQueue(shuffled, target.bvid);
-      } else {
-        if (hasMore) await ensureAllLoaded();
-        const fullList = useFolderDataStore.getState().getDisplayedList();
-        setQueue(fullList, target.bvid, context);
-        await loadQueue(fullList, target.bvid);
+
+      // 【修复】强制切换为顺序播放模式，避免 shuffle 模式触发大量请求
+      if (usePlayerStore.getState().playMode !== 'sequential') {
+        usePlayerStore.getState().setPlayMode('sequential');
       }
-      
-      await TrackPlayer.play();
+
+      // 立即使用当前已加载的列表数据构建播放队列（零网络请求）
+      setQueue(displayedList, target.bvid, context);
+      await loadQueue(displayedList, target.bvid);
+
+      // 立即导航到播放器页面，消除阻塞等待感
       navigation.navigate('Player');
+
+      // 立即开始播放当前轨道
+      await TrackPlayer.play();
+
+      // 后台异步加载更多数据并追加到队列尾部
+      usePlayerStore.getState().setQueueLoading(true);
+      loadMoreInBackground().catch(() => {
+        usePlayerStore.getState().setQueueLoading(false);
+      });
     } catch (e: any) {
       const msg = e.message || '播放失败';
       if (Platform.OS === 'android') {
@@ -133,13 +233,31 @@ export const VideosScreen = ({ route, navigation }: any) => {
       } else {
         Alert.alert('播放错误', msg);
       }
+      usePlayerStore.getState().setQueueLoading(false);
     }
-  };
+  }, [displayedList, mediaId, sortOption, searchQuery, loadMoreInBackground]);
 
-  const playAll = async () => {
+  const playAll = useCallback(async () => {
     try {
-      if (hasMore) await ensureAllLoaded();
-      await playFrom(0);
+      const currentList = useFolderDataStore.getState().getDisplayedList();
+      if (currentList.length === 0) return;
+
+      // 强制顺序模式
+      if (usePlayerStore.getState().playMode !== 'sequential') {
+        usePlayerStore.getState().setPlayMode('sequential');
+      }
+
+      const target = currentList[0];
+      const context = { folderId: mediaId, sortOption, searchQuery };
+      setQueue(currentList, target.bvid, context);
+      await loadQueue(currentList, target.bvid);
+      navigation.navigate('Player');
+      await TrackPlayer.play();
+
+      usePlayerStore.getState().setQueueLoading(true);
+      loadMoreInBackground().catch(() => {
+        usePlayerStore.getState().setQueueLoading(false);
+      });
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
       if (Platform.OS === 'android') {
@@ -147,10 +265,11 @@ export const VideosScreen = ({ route, navigation }: any) => {
       } else {
         Alert.alert('播放错误', msg);
       }
+      usePlayerStore.getState().setQueueLoading(false);
     }
-  };
+  }, [displayedList, playFrom]);
 
-  const shuffle = async () => {
+  const shuffle = useCallback(async () => {
     try {
       // 使用 O(1) 随机获取
       const shuffled = await favoriteService.getRandomVideos(mediaId.toString(), 100);
@@ -172,7 +291,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         Alert.alert('播放错误', msg);
       }
     }
-  };
+  }, [displayedList, playFrom]);
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.background },
@@ -232,7 +351,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
   // No longer using cycleSort, sorting handled via modal
 
   return (
-    <View style={s.container}>
+    // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
+    <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
       <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
       <Header title={`${title}`} showBack />
       {/* 搜索 + 排序栏 */}
@@ -261,6 +381,12 @@ export const VideosScreen = ({ route, navigation }: any) => {
           data={displayedList}
           keyExtractor={(it) => it.bvid}
           showsVerticalScrollIndicator={false}
+          // ========== 性能优化参数 ==========
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          // =================================
           ListHeaderComponent={
             <View style={s.actions}>
               <Button title="全部播放" onPress={playAll} style={s.actionBtn} />
@@ -268,21 +394,21 @@ export const VideosScreen = ({ route, navigation }: any) => {
             </View>
           }
           renderItem={({ item, index }) => (
-            <TouchableOpacity activeOpacity={0.7} style={s.item} onPress={() => playFrom(index)}>
-              <FastImage source={{ uri: item.cover }} style={s.cover} />
-              <View style={s.info}>
-                <Text style={s.title} numberOfLines={2}>{item.title}</Text>
-                <View style={s.meta}>
-                  <Text style={s.upper} numberOfLines={1}>{item.upper.name}</Text>
-                  <Text style={s.duration}>{formatDuration(item.duration)}</Text>
-                </View>
-              </View>
-              <IconButton name="dots-vertical" size={24} color={t.colors.text}
-                onPress={() => {
-                  setSelectedVideo(item);
-                  setModalVisible(true);
-                }} />
-            </TouchableOpacity>
+            <VideoItem
+              item={item}
+              index={index}
+              onPlay={playFrom}
+              onMenu={(v) => { setSelectedVideo(v); setModalVisible(true); }}
+              coverColor={t.colors.surfaceHigh}
+              textColor={t.colors.text}
+              textHintColor={t.colors.textHint}
+              surfaceHighColor={t.colors.surfaceHigh}
+              fontSizeBase={t.fontSize.base}
+              fontSizeSm={t.fontSize.sm}
+              spacingSm={t.spacing.sm}
+              spacingMd={t.spacing.md}
+              spacingLg={t.spacing.lg}
+            />
           )}
           onEndReached={loadMore}
           onEndReachedThreshold={0.4}

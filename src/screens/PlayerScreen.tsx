@@ -25,7 +25,10 @@ export const PlayerScreen = () => {
   const nav = useNavigation<any>();
   const track = useActiveTrack();
   const playback = usePlaybackState();
-  const progress = useProgressStore();
+  // 【性能修复】选择性子订阅 progressStore，避免每次进度轮询都触发全组件重渲染
+  const progressPosition = useProgressStore((s) => s.position);
+  const progressDuration = useProgressStore((s) => s.duration);
+  const progressBuffered = useProgressStore((s) => s.buffered);
   const quality = useSettingsStore((s) => s.quality);
   // const playlistVisible = useUIStore(state => state.playlistVisible); // removed, handled globally
   // 性能优化：订阅当前正在播放的视频而非整个 queue 数组，
@@ -131,7 +134,7 @@ export const PlayerScreen = () => {
   });
 
   const onSeekEnd = (p: number) => {
-    TrackPlayer.seekTo(p * progress.duration);
+    TrackPlayer.seekTo(p * progressDuration);
   };
 
   return (
@@ -156,10 +159,10 @@ export const PlayerScreen = () => {
         <View style={[s.body, { alignItems: 'center', paddingHorizontal: t.spacing.xl }]}>
           <FastImage source={{ uri: track.artwork as string }} style={s.cover} />
           <View style={s.progressBox}>
-            <ProgressBar progress={progress.duration > 0 ? progress.position / progress.duration : 0} onSeekEnd={onSeekEnd} />
+            <ProgressBar progress={progressDuration > 0 ? progressPosition / progressDuration : 0} onSeekEnd={onSeekEnd} />
             <View style={s.timeRow}>
-              <Text style={s.time}>{formatDuration(progress.position)}</Text>
-              <Text style={s.time}>{formatDuration(progress.duration)}</Text>
+              <Text style={s.time}>{formatDuration(progressPosition)}</Text>
+              <Text style={s.time}>{formatDuration(progressDuration)}</Text>
             </View>
           </View>
           <View style={s.controls}>

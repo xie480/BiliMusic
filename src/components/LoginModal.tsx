@@ -14,8 +14,9 @@ import { cookieService } from '../services';
  */
 export const LoginModal = () => {
   const webViewRef = useRef<WebView>(null);
-  const { login } = useAuthStore();
-  const { loginModalVisible, setLoginModalVisible } = useUIStore();
+  const login = useAuthStore((s) => s.login);
+  const loginModalVisible = useUIStore((s) => s.loginModalVisible);
+  const setLoginModalVisible = useUIStore((s) => s.setLoginModalVisible);
 
   const handleNavigationStateChange = async (navState: any) => {
     const url: string = navState.url;

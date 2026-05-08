@@ -1,6 +1,6 @@
 // src/components/PlaylistPanel.tsx (refactored)
 import React, { useCallback, memo, useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity as RNTouchableOpacity, FlatList, ListRenderItemInfo, ActivityIndicator } from 'react-native';
 import TrackPlayer from 'react-native-track-player';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../theme';
@@ -24,6 +24,7 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
   const playContext = usePlayerStore((s) => s.playContext);
   const appendQueue = usePlayerStore((s) => s.appendQueue);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const queueLoading = usePlayerStore((s) => s.queueLoading);
   const playMode = usePlayerStore((s) => s.playMode);
   const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
   const syncStatus = useSyncStore((s) => s.syncStatus);
@@ -196,6 +197,9 @@ export const PlaylistPanel = ({ visible, onClose }: { visible: boolean; onClose:
       <View style={[styles.header, { borderBottomColor: t.colors.divider }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <Text style={[styles.headerTitle, { color: t.colors.text, marginRight: 8 }]}>播放列表</Text>
+          {queueLoading && (
+            <ActivityIndicator size="small" color={t.colors.primary} style={{ marginRight: 8 }} />
+          )}
           <IconButton
             name={playMode === 'shuffle' ? 'shuffle' : 'repeat'}
             size={20}

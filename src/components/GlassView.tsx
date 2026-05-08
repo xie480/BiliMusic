@@ -85,7 +85,9 @@ export const GlassView: React.FC<GlassViewProps> = ({
   };
 
   return (
-    <View style={[outerStyle, style]}>
+    // 【性能优化】collapsable=false 防止 Android 上 View 融合优化（Overdraw 优化），
+    // 确保 BlurView 的 backdrop 模糊层始终正确渲染
+    <View style={[outerStyle, style]} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
       {/* Inner clip region — overflow hidden lives here so outer shadow isn't clipped */}
       <View style={{ overflow: 'hidden', borderRadius: resolvedBorderRadius }}>
         {/* ── Backdrop blur layer ─────────────────────────────────── */}

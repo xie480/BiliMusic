@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const SplashScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const { authReady, loggedIn } = useAuthStore();
+  const authReady = useAuthStore((s) => s.authReady);
+  const loggedIn = useAuthStore((s) => s.loggedIn);
   const insets = useSafeAreaInsets();
   const launchTime = useRef(Date.now());
 

@@ -79,7 +79,10 @@ export default function App() {
   
   const [isOnline, setIsOnline] = useState(true);
   const navigationRef = useNavigationContainerRef();
-  const { loggedIn, userId: uid, initAuth, authReady } = useAuthStore();
+  const loggedIn = useAuthStore((s) => s.loggedIn);
+  const uid = useAuthStore((s) => s.userId);
+  const initAuth = useAuthStore((s) => s.initAuth);
+  const authReady = useAuthStore((s) => s.authReady);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const playlistVisible = useUIStore(state => state.playlistVisible);
   const setPlaylistVisible = useUIStore(state => state.setPlaylistVisible);
@@ -200,7 +203,10 @@ export default function App() {
                 screenOptions={{
                   headerShown: false,
                   cardStyle: { backgroundColor: 'transparent' },
-                  animation: isGlassMode ? 'none' : 'default'
+                  animation: isGlassMode ? 'none' : 'default',
+                  // 【性能优化】启用 freezeOnBlur：页面不可见时停止渲染，
+                  // 配合 react-native-screens 释放 GPU/CPU 资源
+                  freezeOnBlur: true,
                 }}
               >
                 <Stack.Screen name="Splash" component={SplashScreenWithBg} />

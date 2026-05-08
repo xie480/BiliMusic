@@ -29,6 +29,8 @@ interface PlayerState {
   currentCid: number | null;
   /** 是否正在解析占位符音频资源 */
   isResolving: boolean;
+  /** 是否正在后台异步构建播放队列（追加更多分页数据） */
+  queueLoading: boolean;
   setQueue: (q: FavoriteVideo[], bvid?: string, context?: PlayContext) => void;
   setCurrentBvid: (bvid: string | null) => void;
   setPlaybackError: (msg: string | null) => void;
@@ -38,6 +40,8 @@ interface PlayerState {
   setCurrentCid: (cid: number | null) => void;
   /** 设置解析状态 */
   setResolving: (resolving: boolean) => void;
+  /** 设置后台队列加载状态 */
+  setQueueLoading: (loading: boolean) => void;
   togglePlayMode: () => void;
   insertNext: (video: FavoriteVideo) => Promise<void>;
   removeFromQueue: (bvid: string) => Promise<void>;
@@ -54,6 +58,7 @@ export const usePlayerStore = create<PlayerState>()(
       currentBvid: null,
       currentCid: null,
       isResolving: false,
+      queueLoading: false,
       playbackError: null,
       playMode: 'sequential',
       originalQueue: [],
@@ -69,6 +74,7 @@ export const usePlayerStore = create<PlayerState>()(
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
       setCurrentCid: (cid) => set({ currentCid: cid }),
       setResolving: (resolving) => set({ isResolving: resolving }),
+      setQueueLoading: (loading) => set({ queueLoading: loading }),
       setPlayContext: (context) => set({ playContext: context }),
       updateVideoParts: (bvid, parts) => set(state => ({
         queue: state.queue.map(v => (v.bvid === bvid ? { ...v, parts } : v)),

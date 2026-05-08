@@ -83,8 +83,13 @@ export const SettingsScreen = ({ navigation }: any) => {
   }, []);
 
   // Auth state
-  const { loggedIn, userId, userInfo, isVip, logout, setUserInfo } = useAuthStore();
-  const { setLoginModalVisible } = useUIStore();
+  const loggedIn = useAuthStore((s) => s.loggedIn);
+  const userId = useAuthStore((s) => s.userId);
+  const userInfo = useAuthStore((s) => s.userInfo);
+  const isVip = useAuthStore((s) => s.isVip);
+  const logout = useAuthStore((s) => s.logout);
+  const setUserInfo = useAuthStore((s) => s.setUserInfo);
+  const setLoginModalVisible = useUIStore((s) => s.setLoginModalVisible);
 
   // 音质选择逻辑（VIP 验证）
   const handleQualitySelect = useCallback((opt: typeof QUALITY_OPTIONS[number]) => {

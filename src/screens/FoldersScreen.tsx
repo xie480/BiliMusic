@@ -41,7 +41,9 @@ export const FoldersScreen = ({ navigation }: any) => {
   const uid = useAuthStore((s) => s.userId);
   const hiddenFolderIds = useSettingsStore((s) => s.hiddenFolderIds);
   const setQueue = usePlayerStore((s) => s.setQueue);
-  const { selectedIds, toggle, clear } = useSelectionStore();
+  const selectedIds = useSelectionStore((s) => s.selectedIds);
+  const toggle = useSelectionStore((s) => s.toggle);
+  const clear = useSelectionStore((s) => s.clear);
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -134,12 +136,14 @@ export const FoldersScreen = ({ navigation }: any) => {
     }
     setQueue(shuffled, shuffled[0]?.bvid);
     await loadQueue(shuffled, shuffled[0]?.bvid);
+    // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
     await TrackPlayer.play();
     navigation.navigate('Player');
   };
 
   return (
-    <View style={s.container}>
+    // 【性能优化】collapsable=false 确保 Android 上屏幕容器不被 View 融合优化
+    <View style={s.container} {...(Platform.OS === 'android' ? { collapsable: false as any } : {})}>
       <StatusBar
         barStyle={t.isDark ? 'light-content' : 'dark-content'}
         translucent
@@ -220,6 +224,12 @@ export const FoldersScreen = ({ navigation }: any) => {
           showsVerticalScrollIndicator={false}
           data={filteredVideos}
           keyExtractor={(it) => it.bvid}
+          // ========== 性能优化参数 ==========
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          // =================================
           ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
           renderItem={({ item, index }) => (
             <TouchableOpacity
@@ -231,11 +241,18 @@ export const FoldersScreen = ({ navigation }: any) => {
                 backgroundColor: t.colors.surface,
               }}
               onPress={async () => {
+                const video = filteredVideos[index];
+                if (!video) return;
                 try {
-                  const video = filteredVideos[index];
-                  if (!video) return;
-                  await setQueue(filteredVideos, video.bvid);
-                  await loadQueue(filteredVideos, video.bvid);
+                  // 【修复】限制搜索队列大小（最多 100 首），避免 Bridge 过载
+                  const MAX_QUEUE = 100;
+                  const queueVideos = filteredVideos.length > MAX_QUEUE
+                    ? filteredVideos.slice(0, MAX_QUEUE)
+                    : filteredVideos;
+                  // 【修复E】先更新 store，同步加载队列，再显式触发播放
+                  setQueue(queueVideos, video.bvid);
+                  await loadQueue(queueVideos, video.bvid);
+                  // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
                   await TrackPlayer.play();
                   navigation.navigate('Player');
                 } catch (e: any) {
@@ -310,6 +327,12 @@ export const FoldersScreen = ({ navigation }: any) => {
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           data={filteredFolders}
+          // ========== 性能优化参数 ==========
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
+          // =================================
           ListHeaderComponent={
             <View
               style={{

@@ -17,7 +17,9 @@ export const MiniPlayer: React.FC = () => {
   const t = useTheme();
   const track = useActiveTrack();
   const playback = usePlaybackState();
-  const progress = useProgressStore();
+  // 【性能修复】选择性子订阅，避免每次进度轮询触发重渲染
+  const progressPosition = useProgressStore((s) => s.position);
+  const progressDuration = useProgressStore((s) => s.duration);
   const nav = useNavigation<any>();
   const isGlass = !!t.glass;
   const isResolving = usePlayerStore((s) => s.isResolving);
@@ -25,7 +27,7 @@ export const MiniPlayer: React.FC = () => {
   if (!track) return null;
   const isPlaying = playback.state === State.Playing;
   const isBufferingOrResolving = playback.state === State.Buffering || playback.state === State.Loading || isResolving;
-  const p = progress.duration > 0 ? progress.position / progress.duration : 0;
+  const p = progressDuration > 0 ? progressPosition / progressDuration : 0;
 
   const s = StyleSheet.create({
     wrap: {
@@ -54,7 +56,7 @@ export const MiniPlayer: React.FC = () => {
   });
 
   const innerContent = (
-    <View>
+    <>
       <View style={s.progress}>
         {isGlass && t.glass && t.glass.colors.progress.fill ? (
           <LinearGradient
@@ -95,7 +97,7 @@ export const MiniPlayer: React.FC = () => {
                       onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
         </View>
       </View>
-    </View>
+    </>
   );
 
   if (isGlass) {

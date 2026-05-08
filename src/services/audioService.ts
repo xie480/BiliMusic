@@ -17,11 +17,9 @@ const QUALITY_MAP: Record<Quality, number> = {
 const QUALITY_ORDER: Quality[] = ['hires', 'dolby', 'high', 'medium', 'low'];
 
 function pickAudio(audios: ReturnType<typeof normalizeAudio>[], quality: Quality) {
-  // 按带宽降序排列，优先匹配目标音质；若不存在则根据 Quality 优先级向下回退
   const sorted = [...audios].sort((a, b) => b.bandwidth - a.bandwidth);
   const startIdx = QUALITY_ORDER.indexOf(quality);
   if (startIdx === -1) {
-    // 未知音质，直接返回最高带宽
     return sorted[0];
   }
   for (let i = startIdx; i < QUALITY_ORDER.length; i++) {
@@ -29,15 +27,42 @@ function pickAudio(audios: ReturnType<typeof normalizeAudio>[], quality: Quality
     const match = sorted.find((a) => a.id === targetId);
     if (match) return match;
   }
-  // 若仍未匹配到任何音质，返回最高可用音质
   return sorted[0];
 }
 
-// 选择最快可用 CDN URL，使用并发 HEAD（或带 Range 的 GET）请求并缓存结果
+/** 从 URL 中提取域名 */
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** 全局 CDN 域名测速缓存：避免对同一域名的每个 BVID 重复 HEAD 请求 */
+const domainSpeedCache = new Map<string, { fastestBaseUrl: string; timestamp: number }>();
+const DOMAIN_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+
+/**
+ * 基于域名缓存的快速 URL 选择
+ * - 如果当前 baseUrl 所在域名已被测速为最快，跳过 HEAD 请求直接使用
+ * - 如果当前 baseUrl 域名未知，执行测速并缓存结果
+ */
 async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: string[]): Promise<string> {
   const cacheKey = `fastestUrl:${bvid}`;
   const cached = cache.get<string>(cacheKey);
   if (cached) return cached;
+
+  const domain = extractDomain(baseUrl);
+  const now = Date.now();
+
+  // 域名级缓存命中：直接返回该域名下的最快 URL，跳过 HEAD 请求
+  const domainEntry = domainSpeedCache.get(domain);
+  if (domainEntry && (now - domainEntry.timestamp) < DOMAIN_CACHE_TTL) {
+    cache.set(cacheKey, domainEntry.fastestBaseUrl, config.cacheTTL.audioUrl);
+    return domainEntry.fastestBaseUrl;
+  }
+
   const urls = [baseUrl, ...(backupUrls || [])];
   const tryUrl = async (url: string): Promise<string> => {
     const controller = new AbortController();
@@ -64,14 +89,32 @@ async function selectFastestUrl(bvid: string, baseUrl: string, backupUrls: strin
     } catch {}
     throw new Error('unreachable');
   };
+
   try {
     const fastest = await Promise.any(urls.map(tryUrl));
     cache.set(cacheKey, fastest, config.cacheTTL.audioUrl);
+    // 缓存域名级结果
+    const fastestDomain = extractDomain(fastest);
+    if (fastestDomain) {
+      domainSpeedCache.set(fastestDomain, { fastestBaseUrl: fastest, timestamp: now });
+    }
     return fastest;
   } catch {
-    // 所有 CDN 均不可达，回退至原始 baseUrl
     cache.set(cacheKey, baseUrl, config.cacheTTL.audioUrl);
+    // 即使全部失败，也缓存域名结果避免重复测速
+    if (domain) {
+      domainSpeedCache.set(domain, { fastestBaseUrl: baseUrl, timestamp: now });
+    }
     return baseUrl;
+  }
+}
+
+/** 清除指定的域名级测速缓存（用于手动刷新或错误恢复） */
+export function invalidateDomainCache(domain?: string) {
+  if (domain) {
+    domainSpeedCache.delete(domain);
+  } else {
+    domainSpeedCache.clear();
   }
 }
 
@@ -93,7 +136,6 @@ export const audioService = {
         cacheKey,
         config.cacheTTL.audioUrl,
         async () => {
-          // videoInfo 单独缓存，与 quality 无关
           const info = await cache.getOrSet(
             `videoInfo:${bvid}`,
             config.cacheTTL.videoInfo,
@@ -106,10 +148,9 @@ export const audioService = {
           
           let audios = (playUrl.dash?.audio || []).map(normalizeAudio);
           
-          // 如果没有 dash 音频流，尝试回退到 durl（MP4 混合流）
           if (audios.length === 0 && playUrl.durl && playUrl.durl.length > 0) {
             audios = playUrl.durl.map(d => ({
-              id: 30216, // 默认给个低音质 ID
+              id: 30216,
               bandwidth: 0,
               mimeType: 'audio/mp4',
               baseUrl: d.url,
@@ -121,8 +162,7 @@ export const audioService = {
             throw new ResourceUnavailableError('该视频无可用音频流');
           }
           const audio = pickAudio(audios, quality);
-  
-          // 构建分P信息（如果有的话）
+
           const parts = (info as any).pages?.map((p: any) => ({
             cid: p.cid,
             page: p.page,
@@ -147,11 +187,11 @@ export const audioService = {
             parts,
           };
         },
-        false // 仅内存缓存，不持久化（URL 有时效）
+        false
       );
     },
 
-  /** 强制刷新某 BV 的所有音质缓存（URL 失效时） */
+  /** 强制刷新某 BV 的所有音质缓存 */
   invalidate(bvid: string) {
     cache.deletePrefix(`audioInfo:${bvid}`);
   },

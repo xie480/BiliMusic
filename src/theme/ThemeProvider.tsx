@@ -20,7 +20,7 @@ const ThemeContext = createContext<Theme | null>(null);
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   const systemScheme = useColorScheme();
-  const { themeMode } = useSettingsStore();
+  const themeMode = useSettingsStore((s) => s.themeMode);
 
   const isGlassLight = themeMode === 'glass-light';
   const isGlassDark = themeMode === 'glass-dark';

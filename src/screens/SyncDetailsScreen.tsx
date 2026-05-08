@@ -41,7 +41,7 @@ function getSyncStatusDisplay(meta: PlaylistMeta | null) {
 
 export const SyncDetailsScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const { userId: uid } = useAuthStore();
+  const uid = useAuthStore((s) => s.userId);
   const [loading, setLoading] = useState(true);
   const [foldersInfo, setFoldersInfo] = useState<FolderSyncInfo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());

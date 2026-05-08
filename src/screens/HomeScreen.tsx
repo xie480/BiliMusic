@@ -11,8 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const HomeScreen = ({ navigation }: any) => {
   const t = useTheme();
-  const { loggedIn } = useAuthStore();
-  const { setLoginModalVisible } = useUIStore();
+  const loggedIn = useAuthStore((s) => s.loggedIn);
+  const setLoginModalVisible = useUIStore((s) => s.setLoginModalVisible);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
