@@ -1,4 +1,5 @@
-export type Quality = 'low' | 'medium' | 'high';
+/** 音质选项 */
+export type Quality = 'low' | 'medium' | 'high' | 'dolby' | 'hires';
 
 /** 收藏夹（精简后）*/
 export interface FavoriteFolder {

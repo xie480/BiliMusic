@@ -20,8 +20,15 @@ import { audioDSP } from '../native/AudioDSPModule';
 /** 轮询间隔（毫秒） */
 const POLL_INTERVAL_MS = 80; // ~12.5 fps，平衡性能与流畅度
 
-/** 指数移动平均平滑因子 (0=不平滑, 0.9=强平滑) */
-const SMOOTHING_FACTOR = 0.75;
+/**
+ * 指数移动平均平滑因子
+ *
+ * 【重要】原生层 (FFTAnalyzer + SpectrumRenderer) 已实现精密的非对称平滑、
+ * AGC 自适应增益控制与重力衰减物理引擎。JS 层的平滑仅作为轮询间隔
+ * (80ms) 桥接补偿，大幅降低以避免干扰原生动画手感。
+ * 0=不平滑, 0.9=强平滑 — 当前 0.15 仅做最轻量的帧间过渡。
+ */
+const SMOOTHING_FACTOR = 0.15;
 
 /** 调试模式：打印频谱数据长度（仅在开发环境生效） */
 const DEBUG = __DEV__;

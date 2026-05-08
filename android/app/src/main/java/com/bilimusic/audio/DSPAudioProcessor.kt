@@ -21,6 +21,11 @@ import kotlin.concurrent.write
  */
 class DSPAudioProcessor {
 
+    companion object {
+        @Volatile
+        var instance: DSPAudioProcessor? = null
+    }
+
     // 10-band Graphic EQ 滤波器
     private val graphicFilters = Array(10) { BiquadFilter() }
 
@@ -52,6 +57,9 @@ class DSPAudioProcessor {
     enum class EQMode { GRAPHIC, PARAMETRIC }
 
     init {
+        // 注册全局实例（供 ExoPlayer AudioProcessor 注入使用）
+        instance = this
+
         // 初始化 Graphic EQ 滤波器（默认平直曲线）
         for (i in graphicFilters.indices) {
             graphicFilters[i].sampleRate = 44100f

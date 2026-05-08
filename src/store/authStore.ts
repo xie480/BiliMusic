@@ -8,6 +8,16 @@ type UserInfo = {
   avatar: string;
 };
 
+/** B 站大会员等级 */
+export type VipStatus = {
+  /** 会员类型: 0=无, 1=月度, 2=年度 */
+  type: number;
+  /** 会员状态: 0=无, 1=有效 */
+  status: number;
+  /** 大会员到期时间（时间戳，秒） */
+  dueDate?: number;
+};
+
 /** Auth store to manage login state and coordinate login flow */
 type AuthState = {
   /** 是否已登录 */
@@ -16,6 +26,10 @@ type AuthState = {
   userId: string | null;
   /** 当前用户信息 */
   userInfo: UserInfo | null;
+  /** 大会员状态（null 表示未登录或尚未获取） */
+  vipStatus: VipStatus | null;
+  /** 是否为有效大会员（快捷访问） */
+  isVip: boolean;
   /** 认证状态是否已初始化完成 */
   authReady: boolean;
   /** 登录成功后调用，设置状态并可传入 UID */
@@ -38,19 +52,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loggedIn: false,
   userId: null,
   userInfo: null,
+  vipStatus: null,
+  isVip: false,
   authReady: false,
   initAuth: async () => {
     const cookie = await cookieService.get();
     if (cookie) {
       try {
         const info = await biliApi.getUserInfo();
-        set({ loggedIn: true, userId: info.uid, userInfo: info });
+        const isVip = info.vipStatus.status === 1 && info.vipStatus.type > 0;
+        set({
+          loggedIn: true,
+          userId: info.uid,
+          userInfo: { uid: info.uid, name: info.name, avatar: info.avatar },
+          vipStatus: info.vipStatus,
+          isVip,
+        });
       } catch (e) {
         console.error('initAuth failed', e);
-        set({ loggedIn: false, userId: null, userInfo: null });
+        set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
       }
     } else {
-      set({ loggedIn: false, userId: null, userInfo: null });
+      set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
     }
     set({ authReady: true });
   },
@@ -59,7 +82,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ loggedIn: true, userId: uid ?? null });
     try {
       const info = await biliApi.getUserInfo();
-      set({ userInfo: info, userId: info.uid });
+      const isVip = info.vipStatus.status === 1 && info.vipStatus.type > 0;
+      set({
+        userInfo: { uid: info.uid, name: info.name, avatar: info.avatar },
+        userId: info.uid,
+        vipStatus: info.vipStatus,
+        isVip,
+      });
     } catch (e) {
       console.error('login fetch user info failed', e);
     }
@@ -71,7 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   logout: async () => {
     await cookieService.clear();
-    set({ loggedIn: false, userId: null, userInfo: null });
+    set({ loggedIn: false, userId: null, userInfo: null, vipStatus: null, isVip: false });
   },
   setLoginResolver: (resolver) => {
     set({ loginResolver: resolver });

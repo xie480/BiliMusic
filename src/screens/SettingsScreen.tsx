@@ -25,10 +25,18 @@ import type { Quality } from '../types/domain';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import RNFS from 'react-native-fs';
 
-const QUALITY_OPTIONS: Array<{ key: Quality; title: string; subtitle: string }> = [
-  { key: 'low', title: '省流', subtitle: '64 kbps · 约 1.9MB / 4 分钟' },
-  { key: 'medium', title: '标准', subtitle: '132 kbps · 约 3.8MB / 4 分钟' },
+const QUALITY_OPTIONS: Array<{
+  key: Quality;
+  title: string;
+  subtitle: string;
+  /** 是否需要大会员 */
+  requiresVip?: boolean;
+}> = [
+  { key: 'hires', title: 'HI-FES 无损', subtitle: '无损音频 · 最高音质', requiresVip: true },
+  { key: 'dolby', title: '杜比全景声', subtitle: '沉浸式环绕声体验', requiresVip: true },
   { key: 'high', title: '高音质', subtitle: '192 kbps · 约 5.5MB / 4 分钟' },
+  { key: 'medium', title: '标准', subtitle: '132 kbps · 约 3.8MB / 4 分钟' },
+  { key: 'low', title: '省流', subtitle: '64 kbps · 约 1.9MB / 4 分钟' },
 ];
 
 const THEME_OPTIONS: Array<{ key: ThemeMode; title: string }> = [
@@ -59,8 +67,21 @@ export const SettingsScreen = ({ navigation }: any) => {
   const [globalIndexCount, setGlobalIndexCount] = useState(0);
 
   // Auth state
-  const { loggedIn, userId, userInfo, logout, setUserInfo } = useAuthStore();
+  const { loggedIn, userId, userInfo, isVip, logout, setUserInfo } = useAuthStore();
   const { setLoginModalVisible } = useUIStore();
+
+  // 音质选择逻辑（VIP 验证）
+  const handleQualitySelect = useCallback((opt: typeof QUALITY_OPTIONS[number]) => {
+    if (opt.requiresVip && !loggedIn) {
+      Alert.alert('提示', '请先登录后再选择该音质');
+      return;
+    }
+    if (opt.requiresVip && !isVip) {
+      Alert.alert('大会员专享', `「${opt.title}」需要开通 B 站大会员后方可使用`);
+      return;
+    }
+    setQuality(opt.key);
+  }, [loggedIn, isVip, setQuality]);
   const triggerLogin = () => setLoginModalVisible(true);
   const handleLogout = async () => {
     await logout();
@@ -290,21 +311,29 @@ export const SettingsScreen = ({ navigation }: any) => {
 
         <Text style={s.section}>音质</Text>
         <View style={s.group}>
-          {QUALITY_OPTIONS.map((opt, i) => (
-            <React.Fragment key={opt.key}>
-              {i > 0 && <View style={s.sep} />}
-              <ListItem
-                title={opt.title}
-                subtitle={opt.subtitle}
-                onPress={() => setQuality(opt.key)}
-                right={
-                  quality === opt.key ? (
-                    <Text style={{ color: t.colors.primary, fontSize: 18 }}>✓</Text>
-                  ) : null
-                }
-              />
-            </React.Fragment>
-          ))}
+          {QUALITY_OPTIONS.map((opt, i) => {
+            const isVipLocked = opt.requiresVip && !isVip;
+            const isSelected = quality === opt.key;
+            return (
+              <React.Fragment key={opt.key}>
+                {i > 0 && <View style={s.sep} />}
+                <View style={{ opacity: isVipLocked ? 0.45 : 1 }}>
+                  <ListItem
+                    title={opt.title}
+                    subtitle={opt.subtitle}
+                    onPress={() => handleQualitySelect(opt)}
+                    right={
+                      isVipLocked ? (
+                        <Text style={{ fontSize: 16 }}>🔒</Text>
+                      ) : isSelected ? (
+                        <Text style={{ color: t.colors.primary, fontSize: 18 }}>✓</Text>
+                      ) : null
+                    }
+                  />
+                </View>
+              </React.Fragment>
+            );
+          })}
         </View>
 
         <Text style={s.section}>流量</Text>

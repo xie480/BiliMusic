@@ -1,14 +1,76 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
 import { useEQStore, BAND_FREQUENCIES } from '../../store/eqStore';
 import { EQSlider } from './EQSlider';
 
-export const GraphicEQ: React.FC = () => {
+const styles = StyleSheet.create({
+  container: {
+    position: 'relative' as const,
+    paddingRight: 4,
+  },
+  scaleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 4,
+    paddingRight: 4,
+    marginBottom: 4,
+    height: 16,
+  },
+  scaleLabel: {
+    fontSize: 8,
+    fontWeight: '500',
+    width: 20,
+    textAlign: 'center',
+  },
+  scaleLine: {
+    flex: 1,
+    height: 1,
+  },
+  sliderRow: {
+    alignItems: 'flex-end',
+    gap: 4,
+    paddingLeft: 4,
+    paddingRight: 4,
+  },
+  sliderItem: {
+    alignItems: 'center',
+  },
+  freqRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingLeft: 8,
+    paddingRight: 8,
+    marginTop: 4,
+  },
+  freqLabel: {
+    fontSize: 8,
+    fontWeight: '400',
+    width: 32,
+    textAlign: 'center',
+  },
+});
+
+/**
+ * GraphicEQ - 图形均衡器
+ *
+ * 性能优化：
+ * - React.memo 包装避免父组件重渲染时重建整个 EQ 区域
+ * - setGraphicBand 回调使用 useCallback + 稳定的 store selector
+ * - 仅订阅必要的 store slice（graphicBands, enabled）
+ */
+export const GraphicEQ: React.FC = React.memo(() => {
   const t = useTheme();
   const graphicBands = useEQStore(s => s.graphicBands);
   const setGraphicBand = useEQStore(s => s.setGraphicBand);
   const enabled = useEQStore(s => s.enabled);
+
+  // 稳定的回调：setGraphicBand 本身来自 zustand，引用稳定
+  const handleValueChange = useCallback(
+    (index: number, val: number) => setGraphicBand(index, val),
+    [setGraphicBand],
+  );
 
   return (
     <View style={styles.container}>
@@ -32,7 +94,7 @@ export const GraphicEQ: React.FC = () => {
             <EQSlider
               label={freq}
               value={graphicBands[index]}
-              onValueChange={(val) => setGraphicBand(index, val)}
+              onValueChange={(val) => handleValueChange(index, val)}
               disabled={!enabled}
               width={36}
               height={170}
@@ -51,51 +113,4 @@ export const GraphicEQ: React.FC = () => {
       </View>
     </View>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    paddingVertical: 8,
-    paddingLeft: 28,
-    paddingRight: 8,
-  },
-  scaleRow: {
-    position: 'absolute',
-    left: 0,
-    top: 30,
-    bottom: 24,
-    width: 24,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-  },
-  scaleLabel: {
-    fontSize: 9,
-    fontWeight: '500',
-  },
-  scaleLine: {
-    width: 12,
-    height: 1,
-  },
-  sliderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 4,
-  },
-  sliderItem: {
-    alignItems: 'center',
-    marginHorizontal: 2,
-  },
-  freqRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 4,
-    paddingHorizontal: 4,
-  },
-  freqLabel: {
-    fontSize: 8,
-    fontWeight: '600',
-    width: 36,
-    textAlign: 'center',
-  },
 });

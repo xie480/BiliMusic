@@ -9,15 +9,23 @@ const QUALITY_MAP: Record<Quality, number> = {
   low: 30216,    //  64 K
   medium: 30232, // 132 K
   high: 30280,   // 192 K
+  dolby: 30250,  // 杜比全景声 Dolby Atmos
+  hires: 30251,  // HI-FES 无损
 };
+
+/** 音质回退优先级（低索引 → 高优先级，越靠前越优先尝试匹配） */
+const QUALITY_ORDER: Quality[] = ['hires', 'dolby', 'high', 'medium', 'low'];
 
 function pickAudio(audios: ReturnType<typeof normalizeAudio>[], quality: Quality) {
   // 按带宽降序排列，优先匹配目标音质；若不存在则根据 Quality 优先级向下回退
   const sorted = [...audios].sort((a, b) => b.bandwidth - a.bandwidth);
-  const qualityOrder: Quality[] = ['high', 'medium', 'low'];
-  const startIdx = qualityOrder.indexOf(quality);
-  for (let i = startIdx; i < qualityOrder.length; i++) {
-    const targetId = QUALITY_MAP[qualityOrder[i]];
+  const startIdx = QUALITY_ORDER.indexOf(quality);
+  if (startIdx === -1) {
+    // 未知音质，直接返回最高带宽
+    return sorted[0];
+  }
+  for (let i = startIdx; i < QUALITY_ORDER.length; i++) {
+    const targetId = QUALITY_MAP[QUALITY_ORDER[i]];
     const match = sorted.find((a) => a.id === targetId);
     if (match) return match;
   }

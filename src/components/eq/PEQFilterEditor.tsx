@@ -9,7 +9,7 @@
  * - 启用/禁用切换
  * - 删除滤波器
  */
-import React, { useRef, useCallback } from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -245,13 +245,12 @@ interface DragSliderProps {
 }
 
 /**
- * 高性能 DragSlider - 使用 ref + requestAnimationFrame 节流模式
+ * 高性能 DragSlider - 释放时提交模式（v2）
  *
- * 性能优化策略（参考 EQSlider.tsx）：
- * 1. 所有热路径参数通过 ref 持有，避免闭包过期
- * 2. PanResponder 移动时仅更新 ref，不直接触发 React state 更新
- * 3. requestAnimationFrame 批量提交值变化
- * 4. 节流阈值避免微振动导致的频繁渲染
+ * 性能优化策略：
+ * 1. 拖动中仅更新本地 ref 值，绝不触发 React 状态更新或 onChange
+ * 2. 释放时一次性提交最终值
+ * 3. 所有热路径参数通过 ref 持有，避免闭包过期
  */
 const DragSlider: React.FC<DragSliderProps> = ({
   value,
@@ -267,12 +266,11 @@ const DragSlider: React.FC<DragSliderProps> = ({
   // ========== Refs（不触发渲染的热路径） ==========
   const trackWidthRef = useRef(0);
   const startValueRef = useRef(value);
-  const pendingValueRef = useRef(value);
-  const lastCommittedValueRef = useRef(value);
   const isDraggingRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
+  const dragValueRef = useRef(value);
+  const lastCommittedValueRef = useRef(value);
 
-  // 参数 ref（确保 PanResponder 闭包始终获取最新参数）
+  // 参数 ref
   const minRef = useRef(min);
   const maxRef = useRef(max);
   const stepRef = useRef(step);
@@ -283,9 +281,6 @@ const DragSlider: React.FC<DragSliderProps> = ({
   maxRef.current = max;
   stepRef.current = step;
   onChangeRef.current = onChange;
-
-  /** 节流阈值：值变化超过此值才触发更新 */
-  const THROTTLE_THRESHOLD = 0.3;
 
   /** 数值 → 百分比（0~1） */
   const valueToFraction = (v: number): number => {
@@ -307,36 +302,7 @@ const DragSlider: React.FC<DragSliderProps> = ({
 
   const fraction = valueToFraction(value);
 
-  // ========== 值提交（带节流） ==========
-  const commitValue = useCallback(() => {
-    const pending = pendingValueRef.current;
-    const lastCommitted = lastCommittedValueRef.current;
-    if (Math.abs(pending - lastCommitted) >= THROTTLE_THRESHOLD || !isDraggingRef.current) {
-      lastCommittedValueRef.current = pending;
-      onChangeRef.current(pending);
-    }
-  }, []);
-
-  // ========== rAF 调度循环 ==========
-  const scheduleFrame = useCallback(() => {
-    if (rafRef.current !== null) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      commitValue();
-      if (isDraggingRef.current) {
-        scheduleFrame();
-      }
-    });
-  }, [commitValue]);
-
-  const cancelFrame = useCallback(() => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-  }, []);
-
-  // ========== PanResponder ==========
+  // ========== PanResponder（释放时提交） ==========
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -344,26 +310,31 @@ const DragSlider: React.FC<DragSliderProps> = ({
       onPanResponderGrant: () => {
         isDraggingRef.current = true;
         startValueRef.current = value;
-        pendingValueRef.current = value;
-        scheduleFrame();
+        dragValueRef.current = value;
       },
       onPanResponderMove: (_, gesture) => {
         if (trackWidthRef.current <= 0) return;
         const dxFraction = gesture.dx / trackWidthRef.current;
         const startFrac = valueToFraction(startValueRef.current);
         const newFraction = Math.max(0, Math.min(1, startFrac + dxFraction));
-        pendingValueRef.current = fractionToValue(newFraction);
-        // 不直接调用 onChange，由 rAF 循环批量提交
+        dragValueRef.current = fractionToValue(newFraction);
+        // 绝不触发 onChange，释放时一次性提交
       },
       onPanResponderRelease: () => {
         isDraggingRef.current = false;
-        commitValue();
-        cancelFrame();
+        const finalValue = dragValueRef.current;
+        if (finalValue !== lastCommittedValueRef.current) {
+          lastCommittedValueRef.current = finalValue;
+          onChangeRef.current(finalValue);
+        }
       },
       onPanResponderTerminate: () => {
         isDraggingRef.current = false;
-        commitValue();
-        cancelFrame();
+        const finalValue = dragValueRef.current;
+        if (finalValue !== lastCommittedValueRef.current) {
+          lastCommittedValueRef.current = finalValue;
+          onChangeRef.current(finalValue);
+        }
       },
     }),
   ).current;

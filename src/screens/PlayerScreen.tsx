@@ -100,7 +100,7 @@ export const PlayerScreen = () => {
     time: { fontSize: t.fontSize.xs, color: textTertiary },
     controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', width: '100%', marginTop: t.spacing.xxl },
     playBtn: { width: 64, height: 64, borderRadius: 32, backgroundColor: playBg, alignItems: 'center', justifyContent: 'center' },
-    bottomBar: { flexDirection: 'row', alignItems: 'center', width: '100%', marginTop: t.spacing.xxl, paddingHorizontal: t.spacing.xl, paddingBottom: insets.bottom + t.spacing.xl },
+    bottomBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', width: '100%', marginTop: t.spacing.xxl, paddingHorizontal: t.spacing.xl, paddingBottom: insets.bottom + t.spacing.xl },
     bottomBarLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: t.spacing.lg },
     statusBar: { flexDirection: 'row', justifyContent: 'center', paddingBottom: insets.bottom + t.spacing.lg, gap: t.spacing.lg },
     statusItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -162,12 +162,17 @@ export const PlayerScreen = () => {
           <View style={s.bottomBar}>
             <IconButton name="playlist-music" size={24} color={isGlass ? textPrimary : t.colors.text} onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
             <IconButton
+              name="tune"
+              size={24}
+              color={isGlass ? textPrimary : t.colors.text}
+              onPress={() => nav.navigate('SoundLab')}
+            />
+            <IconButton
               name={playMode === 'shuffle' ? 'shuffle' : 'repeat'}
               size={24}
               color={isGlass ? textPrimary : t.colors.text}
               onPress={togglePlayMode}
               disabled={syncStatus === 'syncing'}
-              style={{ marginLeft: t.spacing.lg }}
             />
           </View>
           {(isBuffering || isResolving) && (

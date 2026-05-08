@@ -7,17 +7,17 @@
  * - 点击节点打开编辑器
  * - 多滤波器叠加显示总响应曲线
  *
- * 使用 react-native-gesture-handler 的 PanResponder 实现拖动，
- * 无需额外 native 依赖。
+ * 性能优化（v2）：
+ * - DraggableNode 拖动中仅更新本地 ref 位置，不触发任何 React 状态更新
+ * - 释放时一次性提交最终频率和增益值
+ * - curvePoints 使用 useMemo 在 filters 变化时重新计算
  */
-import React, { useRef, useMemo, useCallback, useState } from 'react';
+import React, { useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   PanResponder,
-  TouchableOpacity,
-  useWindowDimensions,
   LayoutChangeEvent,
 } from 'react-native';
 import { useTheme } from '../../theme';
@@ -95,11 +95,12 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
 }) => {
   const t = useTheme();
   const updatePEQFilter = useEQStore(s => s.updatePEQFilter);
-  const { width: windowWidth } = useWindowDimensions();
 
-  // 动态计算容器宽度
-  const containerWidth = windowWidth - 64;
-  const graphWidth = Math.max(200, containerWidth);
+  // 动态计算容器宽度（基于窗口宽度）
+  // 使用 ref 存储以避免对 useWindowDimensions 的依赖
+  const graphWidthRef = useRef(300);
+  // 初始值，将在 onLayout 中更新
+  const graphWidth = graphWidthRef.current;
   const plotWidth = graphWidth - GRAPH_PAD.left - GRAPH_PAD.right;
 
   // 坐标转换函数（基于动态宽高）
@@ -140,8 +141,13 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
     return points;
   }, [computeCombinedResponse, freqToX, gainToY]);
 
+  const onGraphLayout = useCallback((e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0) graphWidthRef.current = w;
+  }, []);
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onLayout={onGraphLayout}>
       {/* dB 刻度标签（左侧） */}
       <View style={styles.scaleLabels} pointerEvents="none">
         <Text style={[styles.scaleLabel, { color: t.colors.textHint }]}>+12</Text>
@@ -229,7 +235,7 @@ export const ParametricEQ: React.FC<ParametricEQProps> = ({
               filter={filter}
               color={FILTER_COLORS[filter.type] ?? t.colors.primary}
               isSelected={selectedFilterId === filter.id}
-              onDrag={(freq, gain) => {
+              onCommit={(freq, gain) => {
                 updatePEQFilter(filter.id, { frequency: freq, gain });
               }}
               onPress={() => onSelectFilter(filter.id)}
@@ -269,7 +275,8 @@ interface DraggableNodeProps {
   filter: PEQFilter;
   color: string;
   isSelected: boolean;
-  onDrag: (freq: number, gain: number) => void;
+  /** 释放时提交最终值 */
+  onCommit: (freq: number, gain: number) => void;
   onPress: () => void;
   freqToX: (freq: number) => number;
   xToFreq: (x: number) => number;
@@ -283,7 +290,7 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
   filter,
   color,
   isSelected,
-  onDrag,
+  onCommit,
   onPress,
   freqToX,
   xToFreq,
@@ -291,40 +298,71 @@ const DraggableNode: React.FC<DraggableNodeProps> = ({
   yToGain,
 }) => {
   const startPos = useRef({ x: 0, y: 0 });
+  // 拖动中的当前位置（ref，不触发渲染）
   const currentX = useRef(freqToX(filter.frequency));
   const currentY = useRef(gainToY(filter.gain));
+  // 最后一次提交的值
+  const lastCommittedFreq = useRef(filter.frequency);
+  const lastCommittedGain = useRef(filter.gain);
+  // 是否正在拖动
+  const isDragging = useRef(false);
 
-  // 同步 prop 变化
-  currentX.current = freqToX(filter.frequency);
-  currentY.current = gainToY(filter.gain);
+  // 存储回调引用以避免闭包过期
+  const onCommitRef = useRef(onCommit);
+  const onPressRef = useRef(onPress);
+  onCommitRef.current = onCommit;
+  onPressRef.current = onPress;
+
+  // 同步 prop 变化到 ref（当外部 filter 变化时）
+  if (!isDragging.current) {
+    currentX.current = freqToX(filter.frequency);
+    currentY.current = gainToY(filter.gain);
+    lastCommittedFreq.current = filter.frequency;
+    lastCommittedGain.current = filter.gain;
+  }
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: () => {
+        isDragging.current = true;
         startPos.current = { x: currentX.current, y: currentY.current };
       },
       onPanResponderMove: (_, gesture) => {
+        // 拖动中仅更新本地 ref，不触发任何状态更新
         const newX = startPos.current.x + gesture.dx;
         const newY = startPos.current.y + gesture.dy;
-        // 边界限制
-        const clampedX = Math.max(
+        currentX.current = Math.max(
           freqToX(FREQ_MIN),
           Math.min(freqToX(FREQ_MAX), newX),
         );
-        const clampedY = Math.max(
+        currentY.current = Math.max(
           gainToY(GAIN_MAX),
           Math.min(gainToY(GAIN_MIN), newY),
         );
-        currentX.current = clampedX;
-        currentY.current = clampedY;
-        const freq = xToFreq(clampedX);
-        const gain = yToGain(clampedY);
-        onDrag(freq, gain);
       },
       onPanResponderRelease: () => {
-        onPress();
+        isDragging.current = false;
+        // 释放时一次性提交
+        const freq = xToFreq(currentX.current);
+        const gain = yToGain(currentY.current);
+        if (freq !== lastCommittedFreq.current || gain !== lastCommittedGain.current) {
+          lastCommittedFreq.current = freq;
+          lastCommittedGain.current = gain;
+          onCommitRef.current(freq, gain);
+        }
+        onPressRef.current();
+      },
+      onPanResponderTerminate: () => {
+        isDragging.current = false;
+        const freq = xToFreq(currentX.current);
+        const gain = yToGain(currentY.current);
+        if (freq !== lastCommittedFreq.current || gain !== lastCommittedGain.current) {
+          lastCommittedFreq.current = freq;
+          lastCommittedGain.current = gain;
+          onCommitRef.current(freq, gain);
+        }
       },
     }),
   ).current;
@@ -380,20 +418,17 @@ function filterResponseAt(filter: PEQFilter, freq: number): number {
   const { type, frequency: f0, gain, q } = filter;
   if (!filter.enabled || gain === 0) return 0;
 
-  // 归一化频率比
   const ratio = freq / f0;
   const invRatio = f0 / freq;
 
   switch (type) {
     case 'Peak': {
-      // 钟形响应：G * (f0/Q)² / sqrt((f² - f0²)² + (f*f0/Q)²) — 近似
       const numerator = ratio * q;
       const denominator = Math.sqrt((ratio * ratio - 1) * (ratio * ratio - 1) + (ratio / q) * (ratio / q));
       const response = numerator / (denominator + 0.001);
       return gain * response;
     }
     case 'LowShelf': {
-      // 简化搁架响应
       const shelf = 1 / Math.sqrt(1 + (ratio * ratio) / (q * q));
       return gain * Math.max(0, shelf);
     }
@@ -402,7 +437,6 @@ function filterResponseAt(filter: PEQFilter, freq: number): number {
       return gain * Math.max(0, shelf);
     }
     case 'LowPass': {
-      // 一阶低通简化
       const lp = 1 / Math.sqrt(1 + ratio * ratio);
       return gain * lp;
     }
@@ -411,7 +445,6 @@ function filterResponseAt(filter: PEQFilter, freq: number): number {
       return gain * hp;
     }
     case 'Notch': {
-      // 反向钟形
       const notch = 1 - 1 / (1 + (ratio - 1 / ratio) * (ratio - 1 / ratio) * q * q);
       return -Math.abs(gain) * notch;
     }
@@ -499,7 +532,6 @@ const styles = StyleSheet.create({
     width: 32,
     textAlign: 'center',
   },
-  // 可拖动节点
   nodeContainer: {
     position: 'absolute',
     width: NODE_SIZE,

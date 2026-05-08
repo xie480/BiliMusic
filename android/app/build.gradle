@@ -20,7 +20,6 @@ react {
     /* Variants */
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
-    //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
     // debuggableVariants = ["liteDebug", "prodDebug"]
 
     /* Bundling */
@@ -42,7 +41,6 @@ react {
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
     // extraPackagerArgs = []
-
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
     // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
@@ -122,6 +120,9 @@ dependencies {
         implementation jscFlavor
     }
     // AndroidX dependencies will be resolved from the versions specified by transitive dependencies.
+
+    // ExoPlayer 用于 AudioProcessor 编译期依赖
+    implementation "com.google.android.exoplayer:exoplayer-core:2.19.0"
 }
 
 apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)
