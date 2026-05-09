@@ -25,7 +25,7 @@ import { Empty } from '../components/Empty';
 import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
-import { favoriteService } from '../services';
+import { favoriteService, loadGlobalIndexCache } from '../services/favoriteService';
 import { appendQueue as tpAppendQueue, loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
 import { prefetchAudioUrl } from '../services/dataPrefetcher';
@@ -47,6 +47,7 @@ export const FoldersScreen = ({ navigation }: any) => {
   const toggle = useSelectionStore((s) => s.toggle);
   const clear = useSelectionStore((s) => s.clear);
   const [allFolders, setAllFolders] = useState<FavoriteFolder[] | null>(null);
+  const [globalIndexReady, setGlobalIndexReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
@@ -105,6 +106,11 @@ export const FoldersScreen = ({ navigation }: any) => {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 【修复】组件挂载时确保全局索引缓存已加载，并触发重新渲染以更新 isGlobalIndexEmpty
+  useEffect(() => {
+    loadGlobalIndexCache().then(() => setGlobalIndexReady(true));
+  }, []);
 
   useEffect(() => {
     StatusBar.setBarStyle(t.isDark ? 'light-content' : 'dark-content');
