@@ -372,9 +372,9 @@ export const SettingsScreen = ({ navigation }: any) => {
                 />
               </View>
               <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                {'· B站限流可能导致同步较慢，请耐心等待\n'}
-                {'· 建议在WIFI环境下完成同步，避免中途停止\n'}
-                {'· 最终结果可能因失效视频与总数存在差异'}
+                · B站限流可能导致同步较慢，请耐心等待
+                · 建议在WIFI环境下完成同步，避免中途停止
+                · 最终结果可能因失效视频与总数存在差异
               </Text>
             </View>
           )}

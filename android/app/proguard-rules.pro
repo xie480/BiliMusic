@@ -50,3 +50,14 @@
 -keepattributes Exceptions
 -keepattributes EnclosingMethod
 -keepattributes InnerClasses
+
+# ========== 自定义音频 DSP 与频谱反射保护 ==========
+# 保护 DSPAudioProcessor 和 EqAudioProcessorAdapter 不被混淆，
+# 因为在 MusicService 中使用了反射调用（Class.forName）
+-keep class com.bilimusic.audio.** { *; }
+-keep class com.bilimusic.module.** { *; }
+-keep class com.bilimusic.visualizer.** { *; }
+
+# 保护 kotlin-audio 中的 BaseAudioPlayer，
+# 因为 patch 中反射调用了它的 getExoPlayer 方法
+-keep class com.doublesymmetry.kotlinaudio.** { *; }
