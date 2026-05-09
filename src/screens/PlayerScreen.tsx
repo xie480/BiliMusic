@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform, Animated } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
@@ -23,7 +24,20 @@ export const PlayerScreen = () => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const nav = useNavigation<any>();
-  const track = useActiveTrack();
+  const fallbackTrack = usePlayerStore(
+    useShallow((s) => {
+      const v = s.queue.find((v) => v.bvid === s.currentBvid);
+      if (!v) return null;
+      return {
+        id: v.bvid,
+        title: v.title,
+        artist: v.upper?.name || '未知歌手',
+        artwork: v.cover,
+        duration: v.duration,
+      };
+    })
+  );
+  const track = useActiveTrack() || fallbackTrack as any;
   const playback = usePlaybackState();
   // 【性能修复】选择性子订阅 progressStore，避免每次进度轮询都触发全组件重渲染
   const progressPosition = useProgressStore((s) => s.position);
@@ -35,7 +49,7 @@ export const PlayerScreen = () => {
   // 避免切换播放模式（shuffle/sequential）时整个播放器界面重渲染
   const trackId = track?.id;
   const currentVideo = usePlayerStore(
-    (s) => trackId ? s.queue.find((v) => v.bvid === trackId) : undefined
+    useShallow((s) => trackId ? s.queue.find((v) => v.bvid === trackId) : undefined)
   );
   const currentCid = usePlayerStore((s) => s.currentCid);
   const isResolving = usePlayerStore((s) => s.isResolving);
@@ -43,6 +57,14 @@ export const PlayerScreen = () => {
   const togglePlayMode = usePlayerStore((s) => s.togglePlayMode);
   const syncStatus = useSyncStore((s) => s.syncStatus);
   const [isPartsModalVisible, setIsPartsModalVisible] = useState(false);
+
+  const fallbackDuration = usePlayerStore(
+    useShallow((s) => {
+      const v = s.queue.find((v) => v.bvid === s.currentBvid);
+      return v?.duration ?? 0;
+    })
+  );
+  const duration = progressDuration || fallbackDuration;
 
   const isPlaying = playback.state === State.Playing;
   const isBuffering = playback.state === State.Buffering || playback.state === State.Loading;
@@ -58,7 +80,7 @@ export const PlayerScreen = () => {
 
   // 封面淡入淡出：track 切换时执行
   useEffect(() => {
-    if (track?.id && track.id !== prevTrackIdRef.current) {
+    if (track?.id && track.id !== prevTrackIdRef.current && !track.url?.startsWith('placeholder://')) {
       prevTrackIdRef.current = track.id;
       // 旧内容淡出 → 新内容淡入
       coverOpacity.setValue(0.3);
@@ -106,7 +128,7 @@ export const PlayerScreen = () => {
   if (!track) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.background }}>
-        <Text style={{ color: t.colors.textSub }}>未播放</Text>
+        <ActivityIndicator size="large" color={t.colors.primary} />
       </View>
     );
   }

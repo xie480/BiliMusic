@@ -22,14 +22,44 @@ import { upsertVideosBatch, persistVideoPartsToDb } from '../db/operations';
 
 // 用于防止同一索引的 lazyResolve 并发执行，避免重复替换
 const resolving = new Set<number>();
-// 占位符轨道因 PlaybackError 停止播放后，等待 lazyResolve 完成自动恢复播放的标志位
+/** 占位符轨道因 PlaybackError 停止播放后，等待 lazyResolve 完成后恢复播放的标志。
+ *  由 PlaybackError 处理器设置，lazyResolve 完成时消费并重置。
+ *  不作为 autoPlay 参数传递，而是 lazyResolve 内部 shouldResumePlay 判定的一项输入。 */
 let _pendingAutoPlayAfterResolve = false;
 /** 连续解析失败的歌曲数，用于触发全局熔断 */
 let consecutiveTrackFailures = 0;
 
+/** 队列版本号：每次 loadQueue / setupPlayer 单调递增。
+ *  所有异步回调（事件处理器、lazyResolve、预取）携带此版本号，
+ *  一旦版本不匹配立即中止，从根本上消除陈旧事件竞态。 */
+let _queueVersion = 0;
+
+/** 队列是否已完成本次加载并稳定。
+ *  - false：正在 addTracksBatched / skip 等操作中（事件过滤用）
+ *  - true：队列结构已稳定，允许事件处理器进入版本校验阶段 */
+let _queueStable = false;
+
 let _ready = false;
-/** 标记新队列加载后是否需要自动播放（由 loadQueue 设置，PlaybackActiveTrackChanged 消费后重置） */
-let _pendingPlay = false;
+
+/**
+ * 统一版本门禁：所有涉及队列操作的异步路径在关键节点调用此函数。
+ * 只要返回 false，调用方必须立即中止，不得继续操作 TrackPlayer。
+ *
+ * @param version  调用方携带的版本号
+ * @param label    日志标签（用于问题定位）
+ * @returns        版本是否仍然有效
+ */
+function guardVersion(version: number, label: string): boolean {
+  if (version !== 0 && version !== _queueVersion) {
+    LoggerService.info(
+      'TrackPlayer',
+      'guardVersion',
+      `[${label}] 版本失效 (调用版本:${version} ≠ 当前版本:${_queueVersion})，中止操作`
+    );
+    return false;
+  }
+  return true;
+}
 
 // ========== 滑动窗口预加载引擎（已迁移至 dataPrefetcher.ts）==========
 // 【性能优化】预加载已从"操作 TrackPlayer 原生队列"改为"纯数据预取"：
@@ -88,28 +118,45 @@ export async function setupPlayer() {
 
     const store = usePlayerStore.getState();
     if (store.queue && store.queue.length > 0) {
-      const tracks = store.queue.map(buildPlaceholderTrack);
-      await addTracksBatched(tracks);
-      
-      const startIndex = Math.max(0, store.queue.findIndex((v) => v.bvid === store.currentBvid));
-      await TrackPlayer.skip(startIndex);
-      
-      const lastPosition = storage.getNumber('lastPlaybackPosition');
-      if (lastPosition && lastPosition > 0) {
-        await TrackPlayer.seekTo(lastPosition);
+      // 【冷启动静默恢复】
+      // 1. 构建队列 + 定位到历史音频位置
+      // 2. 静默解析目标轨道（仅填充 URL，不播放）
+      // 3. 恢复进度
+      // 4. 保持暂停
+      // 全程不触发任何首位音频的预加载或自动播放
+
+      const version = ++_queueVersion;
+      _queueStable = false;
+      _pendingAutoPlayAfterResolve = false;
+
+      try {
+        const tracks = store.queue.map(buildPlaceholderTrack);
+        await addTracksBatched(tracks);
+
+        const startIndex = Math.max(0, store.queue.findIndex((v) => v.bvid === store.currentBvid));
+        await TrackPlayer.skip(startIndex);
+
+        _queueStable = true;
+
+        // 静默恢复进度
+        const lastPosition = storage.getNumber('lastPlaybackPosition');
+        if (lastPosition && lastPosition > 0) {
+          await TrackPlayer.seekTo(lastPosition);
+        }
+
+        // 静默解析目标轨道（不播放）
+        await resolveCurrentTrack(version);
+
+        // 最终保险：强制执行暂停
+        await TrackPlayer.pause();
+      } finally {
+        _queueStable = true;
       }
-      // 【修复D】无论 lastPosition 是否存在，都强制暂停，防止任何自动播放路径
-      await TrackPlayer.pause();
-      
-      // 【修复D】只解析当前轨道，不触发级联（事件处理器不再自动预加载）
-      lazyResolve(startIndex, false).catch(() => {});
     }
 
   } catch (e) {
     LoggerService.error('TrackPlayer', 'setupPlayer', 'setupPlayer error:', e);
   }
-  // 【修复D】重置 _pendingPlay，防止从之前的状态泄露
-  _pendingPlay = false;
   _ready = true;
 }
 
@@ -133,19 +180,97 @@ function buildPlaceholderTrack(v: FavoriteVideo) {
   };
 }
 
-export async function loadQueue(videos: FavoriteVideo[], startBvid?: string) {
-  if (!videos || videos.length === 0) return;
-  await TrackPlayer.reset();
-  const startIndex = Math.max(0, videos.findIndex((v) => v.bvid === startBvid));
+/**
+ * 构建播放队列并跳转到目标轨道。
+ *
+ * 职责边界：
+ * - 仅负责：reset → addTracksBatched → skip(startIndex) → 预取首曲数据
+ * - 不负责：解析任何轨道（lazyResolve 由调用方或事件处理器显式触发）
+ * - 不负责：播放或暂停（播放状态由调用方控制）
+ *
+ * 返回队列版本号，供调用方在后续操作中携带。
+ */
+export async function loadQueue(
+  videos: FavoriteVideo[],
+  startBvid?: string,
+): Promise<number> {
+  if (!videos || videos.length === 0) return _queueVersion;
 
-  const tracks = videos.map(buildPlaceholderTrack);
-  // 【P1修复】批量添加轨道，避免 Bridge 序列化大量数据导致失败
-  await addTracksBatched(tracks);
-  // 由调用方在 loadQueue 完成后显式调用 TrackPlayer.play()
-  await TrackPlayer.skip(startIndex);
-  // 【性能优化】首曲纯数据预取：在 UI 导航动画期间提前获取第一个轨道的音频 URL，
-  // 结果存入内存缓存 (urlCache)，lazyResolve 触发时瞬时命中，显著缩短首次播放等待时间
-  prefetchFirstTrack(startIndex).catch(() => {});
+  // 递增版本号：宣告新队列时代的开始
+  const version = ++_queueVersion;
+  _queueStable = false;
+  // 清空残留的自动播放标志（上一代遗留）
+  _pendingAutoPlayAfterResolve = false;
+
+  try {
+    await TrackPlayer.reset();
+
+    const startIndex = Math.max(
+      0,
+      startBvid ? videos.findIndex((v) => v.bvid === startBvid) : 0,
+    );
+
+    // 【P0修复】先只添加目标轨道的占位符到空队列，原生层仅准备1个轨道
+    // 避免一次性 add 所有轨道时原生层同步准备索引 0 的占位符导致阻塞
+    const targetPlaceholder = buildPlaceholderTrack(videos[startIndex]);
+    await TrackPlayer.add(targetPlaceholder);
+    // 此时队列只有 1 个轨道（目标轨道），活跃索引 = 0
+
+    // 【v3修复】beforeTarget 必须插入到索引 0（目标轨道之前），而非追加到队尾
+    // 确保队列最终顺序与原始列表完全一致：[beforeTarget..., target, afterTarget...]
+    const beforeTarget = videos.slice(0, startIndex);
+    const afterTarget = videos.slice(startIndex + 1);
+
+    if (beforeTarget.length > 0) {
+      // 插入到索引 0：这些轨道将出现在目标轨道之前
+      await addTracksBatched(beforeTarget.map(buildPlaceholderTrack), 0);
+    }
+    if (afterTarget.length > 0) {
+      // 追加到队尾：这些轨道将出现在目标轨道之后
+      await addTracksBatched(afterTarget.map(buildPlaceholderTrack));
+    }
+
+    // beforeTarget 全部插入到索引 0 后，目标轨道被推到位置 beforeTarget.length
+    const finalTargetIndex = beforeTarget.length;
+    await TrackPlayer.skip(finalTargetIndex);
+
+    // 首曲纯数据预取：提前获取音频 URL 存入内存缓存
+    prefetchFirstTrack(finalTargetIndex).catch(() => {});
+
+    return version;
+  } finally {
+    // 标记队列稳定，允许事件处理器进入版本校验阶段
+    _queueStable = true;
+    // 版本号已递增，后续到达的旧版本事件全部被 guardVersion 拦截
+  }
+}
+
+/**
+ * 解析当前活跃轨道（静默，默认不播放）。
+ *
+ * 与 loadQueue 解耦：此函数由调用方在适当时机显式调用。
+ *
+ * 使用场景：
+ * - 冷启动恢复：loadQueue → resolveCurrentTrack(version) → pause
+ * - VideosScreen::playFrom：loadQueue → play → 事件驱动 lazyResolve
+ * - PlaybackError 恢复：由事件处理器标记 _pendingAutoPlayAfterResolve → 触发 lazyResolve
+ *
+ * @param version  调用方持有的队列版本号
+ */
+export async function resolveCurrentTrack(version: number): Promise<void> {
+  if (!guardVersion(version, 'resolveCurrentTrack')) return;
+
+  try {
+    const index = await TrackPlayer.getActiveTrackIndex();
+    if (typeof index !== 'number' || index < 0) return;
+
+    // 二次版本校验：getActiveTrackIndex 是 Bridge 调用，版本可能已变
+    if (!guardVersion(version, 'resolveCurrentTrack:postBridge')) return;
+
+    await lazyResolve(index, { version });
+  } catch (e) {
+    LoggerService.error('TrackPlayer', 'resolveCurrentTrack', '静默解析失败:', e);
+  }
 }
 
 /**
@@ -196,7 +321,6 @@ export async function removeFromQueue(bvid: string): Promise<void> {
  */
 export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
   if (videos.length === 0) return;
-
   // 1. 保存原生队列中已解析的轨道数据（包含文件 URL、cid 等）
   const nativeQueue = await TrackPlayer.getQueue();
   const nativeTrackMap = new Map<string, any>();
@@ -225,9 +349,6 @@ export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string):
   }
 
   // 5. Flicker-Free: 保留当前播放轨道，移除其余所有轨道
-  //    收集非当前轨道索引，通过批量 remove(indexes[]) 一次性移除。
-  //    【性能】O(N) 次桥接调用 → O(1) 次，消除卡顿
-  //    【安全】原子操作避免逐条删除时索引偏移导致的 IndexOutOfBounds 异常
   const indicesToRemove: number[] = [];
   nativeQueue.forEach((t, idx) => {
     if (t.id !== currentBvid) {
@@ -260,8 +381,7 @@ export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string):
     await TrackPlayer.add(afterTracks);
   }
 
-  // 9. 恢复播放状态（TrackPlayer.remove 对非当前轨道不影响播放状态，
-  //    但 add 操作后显式调用 play 确保一致性）
+  // 9. 恢复播放状态
   if (wasPlaying) {
     await TrackPlayer.play();
   }
@@ -280,7 +400,6 @@ export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string):
  */
 export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
   if (videos.length === 0) return;
-
   // O(1)：批量添加轨道（使用 buildPlaceholderTrack 注入 cid）
   const tracks = videos.map(buildPlaceholderTrack);
   await addTracksBatched(tracks);
@@ -288,6 +407,7 @@ export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): 
   const cur = usePlayerStore.getState();
   const combined = [...cur.queue, ...videos];
   cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
+
   // 【性能优化】新轨道加入后，触发滑动窗口纯数据预取，覆盖新追加的轨道
   const activeIndex = await TrackPlayer.getActiveTrackIndex();
   if (typeof activeIndex === 'number' && activeIndex >= 0) {
@@ -301,74 +421,130 @@ export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): 
  */
 const BATCH_SIZE = 15;
 
-async function addTracksBatched(tracks: any[]) {
-  for (let i = 0; i < tracks.length; i += BATCH_SIZE) {
-    const batch = tracks.slice(i, i + BATCH_SIZE);
-    await TrackPlayer.add(batch);
+/**
+ * 批量添加轨道，支持指定插入索引。
+ *
+ * 当 insertIndex 为 number 时，由于 TrackPlayer.add(batch, index)
+ * 是将 batch 整体插入到 index 之前，后续插入的 batch 会出现在更前面，
+ * 因此必须按**逆序**分批处理，以保证最终队列顺序与原始数组一致。
+ *
+ * 示例：BATCH_SIZE=15, tracks=[s0..s19], insertIndex=0, 队列原本=[target]
+ *   逆序分批插入：
+ *     ① 插入 [s15..s19] at 0 → [s15..s19, target]
+ *     ② 插入 [s0..s14]  at 0 → [s0..s14, s15..s19, target] ✓
+ */
+async function addTracksBatched(tracks: any[], insertIndex?: number) {
+  if (typeof insertIndex === 'number') {
+    const totalBatches = Math.ceil(tracks.length / BATCH_SIZE);
+    for (let batchIdx = totalBatches - 1; batchIdx >= 0; batchIdx--) {
+      const start = batchIdx * BATCH_SIZE;
+      const batch = tracks.slice(start, start + BATCH_SIZE);
+      await TrackPlayer.add(batch, insertIndex);
+    }
+  } else {
+    for (let i = 0; i < tracks.length; i += BATCH_SIZE) {
+      const batch = tracks.slice(i, i + BATCH_SIZE);
+      await TrackPlayer.add(batch);
+    }
   }
 }
 
-async function lazyResolve(index: number, autoPlayActive: boolean = true) {
-  // 防止同一索引并发解析导致重复替换
+/**
+ * 选项对象（替代 bool 参数，语义更明确）
+ */
+interface LazyResolveOptions {
+  /** 调用方持有的队列版本号 */
+  version: number;
+  /** 是否在解析完成后自动播放。
+   *  仅在极少数场景（PlaybackError 恢复）可能为 true，
+   *  绝大多数路径必须传 false。缺席时默认 false。 */
+  autoPlay?: boolean;
+}
+
+/**
+ * 解析指定索引的占位符轨道为真实音频 URL。
+ *
+ * 调用约定（硬规则）：
+ * - autoPlay 缺席或 false：静默解析，完成后保持当前播放/暂停状态
+ * - autoPlay 为 true：仅限 PlaybackError 恢复路径经 _pendingAutoPlayAfterResolve 间接达成
+ * - 严禁任何调用方在非恢复场景传入 autoPlay=true
+ *
+ * 三重版本校验：
+ * ① 入口立即校验（同步，零开销）
+ * ② 每次 Bridge await 返回后校验（getActiveTrackIndex / getQueue / add / skip）
+ * ③ 替换占位符前最终校验
+ */
+async function lazyResolve(
+  index: number,
+  options: LazyResolveOptions,
+): Promise<void> {
+  const { version, autoPlay = false } = options;
+
+  // ======== 第一重：入口版本校验 ========
+  if (!guardVersion(version, `lazyResolve:entry(idx=${index})`)) return;
+
+  // 防止同一索引并发解析
   if (resolving.has(index)) return;
   resolving.add(index);
+
   let bvid = '';
   let isActiveTrack = false;
   try {
+    // ======== Bridge 调用 1 ========
     const activeIdx = await TrackPlayer.getActiveTrackIndex();
-    // 【修复三】阻断非当前活跃轨道的解析
-    // 解决 loadQueue 时首个音频的错误并发加载，以及快速切歌导致的资源浪费
     if (activeIdx !== index) {
+      // 活跃轨道已变更，本任务是过期的
       return;
     }
+    // ======== 第二重：Bridge 返回后版本校验 ========
+    if (!guardVersion(version, `lazyResolve:postActiveIdx(idx=${index})`)) return;
+
     isActiveTrack = true;
     usePlayerStore.getState().setResolving(true);
+
+    // ======== Bridge 调用 2 ========
     const queue = await TrackPlayer.getQueue();
+    if (!guardVersion(version, `lazyResolve:postGetQueue(idx=${index})`)) return;
+
     const t = queue[index];
     if (!t || !String(t.url).startsWith('placeholder://')) return;
-    
+
     const rawId = String(t.url).replace('placeholder://', '');
     const [extractedBvid, cidStr] = rawId.split('-');
     bvid = extractedBvid;
     const cid = cidStr ? parseInt(cidStr, 10) : undefined;
+
     // 记录轨道开始加载时间
     performanceMonitor.start(bvid);
     const quality = useSettingsStore.getState().quality;
     const cacheKey = cid ? `${bvid}-${cid}` : bvid;
-    
+
     let url = '';
     let headers: Record<string, string> | undefined;
     let resolvedInfo: any = undefined;
-    
+
     const cachedPath = await audioCache.has(cacheKey, quality);
     if (cachedPath) {
       url = `file://${cachedPath}`;
     } else {
-      // ======== 【性能优化】先查 URL 短期内存缓存 ========
       const cachedUrlEntry = getCachedUrl(bvid, cid);
       if (cachedUrlEntry) {
-        // URL 内存缓存命中！跳过 API 请求，直接使用缓存 URL
         url = cachedUrlEntry.url;
         headers = cachedUrlEntry.headers;
         LoggerService.info('TrackPlayer', 'lazyResolve', `URL 缓存命中 (BVID: ${bvid}, CID: ${cid})，跳过 API 解析`);
       } else {
-        // ======== 缓存未命中，走完整 API 解析流程 ========
-        // 【新增】音频解析重试机制：最多重试 3 次，应对瞬时网络波动或临时限流
         let resolveSuccess = false;
         let lastError: any = null;
-        
+
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
             resolvedInfo = await audioService.getInfo(bvid, quality, cid);
-            // 【P2修复】流式播放：直接使用 CDN URL + headers，无需等待下载完成
             url = resolvedInfo.audio.baseUrl;
             headers = {
               Referer: config.referer,
               'User-Agent': config.userAgent,
             };
-            // ======== 将解析结果存入 URL 内存缓存 ========
             setCachedUrl(bvid, url, headers, cid ?? resolvedInfo.cid);
-            // 后台异步下载缓存，供下次离线播放使用
             audioCache.download(cacheKey, quality, resolvedInfo.audio.baseUrl, {
               Referer: config.referer,
               'User-Agent': config.userAgent,
@@ -377,7 +553,6 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
             break;
           } catch (error) {
             lastError = error;
-            // 【新增】检测到限流立即停止重试，避免触发更严格的风控
             if (error instanceof RateLimitError) {
               LoggerService.warn('TrackPlayer', 'lazyResolve', `检测到 API 限流 (BVID: ${bvid})，停止重试`);
               break;
@@ -386,13 +561,23 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
             if (attempt < 3) await new Promise(r => setTimeout(r, 500));
           }
         }
-        
-        // 【新增】3 次重试均失败，抛出最后一个错误由外层 catch 统一处理
+
         if (!resolveSuccess) {
           throw lastError || new Error('解析音频失败');
         }
       }
     }
+
+    // ======== URL 解析后版本校验 ========
+    if (!guardVersion(version, `lazyResolve:postResolve(idx=${index},bvid=${bvid})`)) return;
+
+    // 异步解析完成后二次校验：确保当前活跃轨道仍然是目标轨道
+    const currentActiveIdx = await TrackPlayer.getActiveTrackIndex();
+    if (currentActiveIdx !== index) {
+      LoggerService.info('TrackPlayer', 'lazyResolve', `解析完成但活跃轨道已变更 (期望:${index} 实际:${currentActiveIdx})，放弃本次替换`);
+      return;
+    }
+    if (!guardVersion(version, `lazyResolve:postActiveIdx2(idx=${index})`)) return;
 
     // 多P视频动态队列展开：仅在根占位符（未指定cid）时执行
     let videoInfo: any;
@@ -402,21 +587,15 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       if (parts && parts.length > 1) {
         usePlayerStore.getState().updateVideoParts(bvid, parts);
         usePlayerStore.getState().setCurrentCid(parts[0].cid);
-        // 【性能优化】将分P信息持久化到 WatermelonDB 的 extra_json 字段。
-        // 下次冷启动时 buildPlaceholderTrack 可直接从 DB 读取 parts 并注入 cid，
-        // 使 lazyResolve 跳过首次 videoInfo 请求，减少 1 RTT。
         persistVideoPartsToDb(bvid, parts).catch((err) => {
           LoggerService.warn('TrackPlayer', 'lazyResolve', `持久化分P信息失败 (BVID: ${bvid}):`, err);
         });
-        // 仅当用户开启"将分P列表加入播放列表"时才展开后续分P
         if (useSettingsStore.getState().expandMultiPart) {
-          // 获取当前队列快照，找到根占位符的位置
           const expandQueue = await TrackPlayer.getQueue();
           const currentIdx = expandQueue.findIndex(
             tr => tr.id === bvid && String(tr.url).startsWith('placeholder://')
           );
           if (currentIdx !== -1) {
-            // 将第2P及之后的分P作为占位符插入到当前轨道之后（倒序插入保持顺序）
             const remainingParts = parts.slice(1);
             for (let i = remainingParts.length - 1; i >= 0; i--) {
               const part = remainingParts[i];
@@ -437,9 +616,11 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
 
     // 动态查找当前 placeholder 的实际索引，防止队列变化导致 index 失效
     const freshQueue = await TrackPlayer.getQueue();
+    if (!guardVersion(version, `lazyResolve:postFreshQueue(idx=${index})`)) return;
+
     const actualIndex = freshQueue.findIndex(tr => tr.id === bvid && String(tr.url).startsWith('placeholder://'));
     if (actualIndex === -1) {
-      return; // 找不到对应的 placeholder，可能已被用户操作移出队列或已解析
+      return;
     }
 
     // 如果是多P视频的根占位符，替换为第一P的标题
@@ -450,32 +631,44 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       title = `${videoInfo.title} - ${videoInfo.parts[0].title}`;
     }
     const newTrack: any = { ...t, url, title, userAgent: config.userAgent, headers, cid: effectiveCid };
-    // 【修复】放弃平滑替换（add→skip→remove），避免触发 PlaybackActiveTrackChanged 事件级联
-    // 改为：根据当前活跃轨道是否为占位符，采用不同策略
+
+    // ======== 第三重：替换前最终版本校验 ========
+    if (!guardVersion(version, `lazyResolve:preReplace(idx=${index})`)) return;
+
     if (isActiveTrack) {
-      // 当前播放的就是占位符 → 需要在占位符后插入真实轨道，跳过去，再删除占位符
-      // 这虽然会触发一次 PlaybackActiveTrackChanged，但不会产生级联（事件处理器不再自动预加载）
       await TrackPlayer.add(newTrack, actualIndex + 1);
-      // 【修复一】记录 skip 前的播放状态，防止 skip 操作底层自动恢复播放
+
+      // 记录 skip 前的播放状态
       const playbackState = await TrackPlayer.getPlaybackState();
       const isPlaying = playbackState.state === State.Playing || playbackState.state === State.Buffering;
+
       await TrackPlayer.skip(actualIndex + 1);
-      // 也检查 _pendingAutoPlayAfterResolve：PlaybackError 检测到占位符错误时设置的标志
-      const shouldPlay = autoPlayActive || _pendingAutoPlayAfterResolve || isPlaying;
-      if (_pendingAutoPlayAfterResolve) _pendingAutoPlayAfterResolve = false;
-      if (shouldPlay) {
+
+      // ======== 统一播放决策 ========
+      // 三条规则按优先级：
+      // 1. _pendingAutoPlayAfterResolve（PlaybackError 恢复标志）→ 需恢复播放
+      // 2. autoPlay（仅 PlaybackError 路径通过标志间接达成，此处为防御性检查）
+      // 3. skip 前正在播放 → 恢复播放（用户主动操作中）
+      // 其他情况：保持暂停
+      const shouldResumePlay =
+        _pendingAutoPlayAfterResolve || autoPlay || isPlaying;
+
+      // 消费恢复标志
+      if (_pendingAutoPlayAfterResolve) {
+        _pendingAutoPlayAfterResolve = false;
+      }
+
+      if (shouldResumePlay) {
         await TrackPlayer.play();
       } else {
-        // 【修复一】明确调用 pause，防止 skip 引起的自动播放，确保启动时保持暂停
         await TrackPlayer.pause();
       }
       await TrackPlayer.remove(actualIndex);
     } else {
-      // 当前播放的不是占位符 → 直接移除占位符，再在相同位置插入真实轨道
-      // remove + add 不触发 PlaybackActiveTrackChanged，完全无事件级联
+      // 非活跃轨道 → 直接替换（remove + add），不触发事件级联
       await TrackPlayer.remove(actualIndex);
       await TrackPlayer.add(newTrack, actualIndex);
-      // 如果由于时序问题（isActiveTrack 判断时尚未活跃，但 PlaybackError 已为此轨道设置了标志），也尝试恢复
+      // PlaybackError 恢复逻辑
       if (_pendingAutoPlayAfterResolve) {
         _pendingAutoPlayAfterResolve = false;
         await TrackPlayer.play().catch(() => {});
@@ -483,17 +676,14 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
     }
   } catch (error) {
     LoggerService.error('TrackPlayer', 'lazyResolve', `解析音频失败 (BVID: ${bvid}):`, error);
-    
-    // 检查网络状态，如果是无网导致的失败，停止播放并避免切歌风暴
+
     if (netStatus.type === 'none' || netStatus.type === 'unknown') {
       LoggerService.warn('TrackPlayer', 'lazyResolve', '无网络连接，停止解析队列');
       await TrackPlayer.pause();
-      // 通过 Zustand store 触发全局 UI 错误提示
       usePlayerStore.getState().setPlaybackError('无网络连接，无法加载音频');
       return;
     }
 
-    // 【新增】限流熔断：检测到 RateLimitError，立即停止播放并报错，不重试也不切歌
     if (error instanceof RateLimitError) {
       LoggerService.warn('TrackPlayer', 'lazyResolve', '触发限流熔断，暂停播放');
       await TrackPlayer.pause();
@@ -502,7 +692,6 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       return;
     }
 
-    // 【新增】连续失败熔断：连续 3 首歌解析失败则暂停播放，防止无限切歌风暴
     consecutiveTrackFailures++;
     if (consecutiveTrackFailures >= 3) {
       LoggerService.warn('TrackPlayer', 'lazyResolve', '连续 3 首歌解析失败，触发熔断，暂停播放');
@@ -512,11 +701,10 @@ async function lazyResolve(index: number, autoPlayActive: boolean = true) {
       return;
     }
 
-    // 解析失败时自动跳到下一首（仅当当前播放的确实是解析失败的这首歌）
     const activeTrackIndex = await TrackPlayer.getActiveTrackIndex();
     const freshQueue = await TrackPlayer.getQueue();
     const activeTrack = typeof activeTrackIndex === 'number' ? freshQueue[activeTrackIndex] : undefined;
-    
+
     if (activeTrack && activeTrack.id === bvid) {
       await TrackPlayer.skipToNext().catch(() => {});
     }
@@ -562,7 +750,7 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.PlaybackState, async (playbackState) => {
     // playbackState is of type PlaybackState, with .state property.
     const playerState = (playbackState as any).state;
-    
+
     // 保存播放进度
     if (playerState === State.Paused || playerState === State.Stopped) {
       try {
@@ -584,63 +772,170 @@ export async function PlaybackService() {
     }
   });
 
+  /**
+   * 【关键修复 v2】PlaybackActiveTrackChanged 事件处理器
+   *
+   * 陈旧事件快速退出策略：
+   * 1. 通过 getActiveTrackIndex() 获取原生层当前的**实际活跃索引**
+   * 2. 若 e.index（事件报告的索引）与 actualIndex 不一致 → 陈旧事件
+   *    → 仅同步 currentBvid 状态，跳过 lazyResolve（避免无效 Bridge 往返）
+   * 3. 所有后续操作使用 actualIndex 而非 e.index，确保操作对象为当前真实活跃轨道
+   *
+   * 为什么这比仅靠 _queueStable + _queueVersion 更可靠：
+   * - 同一版本周期内，原生层批量 add 产生的事件可能延迟到 _queueStable=true 后才到达
+   * - 这些陈旧事件携带的 e.index 指向已过时的索引（如 0），而非当前活跃索引
+   * - 直接比对 e.index 与 actualIndex 是最简练、最精确的陈旧检测
+   */
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, async (e) => {
-    // Record start of track loading/playback
+    if (e.index === undefined) return;
+
+    // ======== 门禁 1：队列是否已稳定 ========
+    if (!_queueStable) {
+      LoggerService.info(
+        'TrackPlayer',
+        'PlaybackActiveTrackChanged',
+        `队列未稳定，屏蔽事件 (index:${e.index})`,
+      );
+      return;
+    }
+
+    // ======== 门禁 2：捕获当前版本号 ========
+    const capturedVersion = _queueVersion;
+    if (capturedVersion === 0) return;
+
+    // ======== 门禁 3：获取当前活跃轨道 ========
     const activeTrack = await TrackPlayer.getActiveTrack();
-    if (activeTrack?.id) {
-      const bvid = activeTrack.id as string;
-      performanceMonitor.start(bvid);
-      // 同步当前播放的 bvid 到 store，修复 UI 高亮不同步问题
-      usePlayerStore.getState().setCurrentBvid(bvid);
-      // 提取当前播放轨道的 cid，更新到 store
-      // 优先从 track 对象的 cid 属性读取（已解析的轨道在 lazyResolve 中设置）
+    if (!guardVersion(capturedVersion, `PlaybackActiveTrackChanged(idx=${e.index})`)) return;
+
+    if (!activeTrack?.id) return;
+
+    // ======== 【v2新增】快速陈旧事件检测：比对事件索引与实际活跃索引 ========
+    const actualIndex = await TrackPlayer.getActiveTrackIndex();
+    if (!guardVersion(capturedVersion, 'PlaybackActiveTrackChanged:postActualIndex')) return;
+
+    if (e.index !== actualIndex) {
+      LoggerService.info(
+        'TrackPlayer',
+        'PlaybackActiveTrackChanged',
+        `陈旧事件 (事件索引:${e.index} ≠ 实际活跃索引:${actualIndex})，仅同步状态后退出`,
+      );
+      // 仅同步 currentBvid / currentCid 状态，不触发 lazyResolve
+      usePlayerStore.getState().setCurrentBvid(activeTrack.id as string);
       const trackCid = (activeTrack as any).cid;
       if (typeof trackCid === 'number') {
         usePlayerStore.getState().setCurrentCid(trackCid);
-      } else if (activeTrack.url && typeof activeTrack.url === 'string') {
-        // 回退：从 placeholder URL 中解析 cid
-        const urlStr = activeTrack.url;
-        if (urlStr.startsWith('placeholder://')) {
-          const rawId = urlStr.replace('placeholder://', '');
-          const parts = rawId.split('-');
-          if (parts.length >= 2) {
-            const cid = parseInt(parts[1], 10);
-            if (!isNaN(cid)) {
-              usePlayerStore.getState().setCurrentCid(cid);
-            }
+      } else {
+        usePlayerStore.getState().setCurrentCid(null);
+      }
+      return;
+    }
+
+    // ======== 路径 A：轨道已解析 → 仅同步状态 + 预取 ========
+    if (activeTrack.url && !String(activeTrack.url).startsWith('placeholder://')) {
+      const bvid = activeTrack.id as string;
+      performanceMonitor.start(bvid);
+      usePlayerStore.getState().setCurrentBvid(bvid);
+
+      const trackCid = (activeTrack as any).cid;
+      if (typeof trackCid === 'number') {
+        usePlayerStore.getState().setCurrentCid(trackCid);
+      } else {
+        usePlayerStore.getState().setCurrentCid(null);
+      }
+
+      prefetchNextTracks(actualIndex).catch(() => {});
+      if (e.lastTrack?.id) autoCache(e.lastTrack.id as string);
+      return;
+    }
+
+    // ======== 路径 B：轨道是占位符 → 静默解析（不自动播放） ========
+    const bvid = activeTrack.id as string;
+    performanceMonitor.start(bvid);
+    usePlayerStore.getState().setCurrentBvid(bvid);
+
+    const trackCid = (activeTrack as any).cid;
+    if (typeof trackCid === 'number') {
+      usePlayerStore.getState().setCurrentCid(trackCid);
+    } else if (activeTrack.url && typeof activeTrack.url === 'string') {
+      const urlStr = activeTrack.url;
+      if (urlStr.startsWith('placeholder://')) {
+        const rawId = urlStr.replace('placeholder://', '');
+        const parts = rawId.split('-');
+        if (parts.length >= 2) {
+          const cid = parseInt(parts[1], 10);
+          if (!isNaN(cid)) {
+            usePlayerStore.getState().setCurrentCid(cid);
           }
-        } else {
-          // 已解析但无 cid 的单P视频，清空 currentCid
-          usePlayerStore.getState().setCurrentCid(null);
         }
+      } else {
+        usePlayerStore.getState().setCurrentCid(null);
       }
     }
-    if (e.index !== undefined) {
-      // 【修复B】简化事件处理器：只解析当前轨道，不检查 _pendingPlay/isCurrentlyPlaying
-      // 播放/暂停由调用方（loadQueue、playFrom 等）显式控制
-      // 不触发自动预加载，彻底切断事件级联链
-      await lazyResolve(e.index, false);
-      // 【性能优化】当前轨道解析完成后，触发滑动窗口纯数据预取后续轨道
-      prefetchNextTracks(e.index).catch(() => {});
-    }
+
+    // 使用实际活跃索引（而非 e.index）调用 lazyResolve
+    await lazyResolve(actualIndex, { version: capturedVersion });
+
+    prefetchNextTracks(actualIndex).catch(() => {});
     if (e.lastTrack?.id) autoCache(e.lastTrack.id as string);
   });
-  // 【修复】增加错误监听，遇到播放错误自动跳过
+
+  // ========== PlaybackError 事件处理器 ==========
   TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
-    // Revised handling: determine if error originates from a placeholder track by inspecting the active track URL
+    // ======== 门禁 1：队列是否已稳定 ========
+    if (!_queueStable) {
+      LoggerService.info(
+        'TrackPlayer',
+        'PlaybackError',
+        '队列未稳定，忽略播放错误',
+      );
+      return;
+    }
+
+    // ======== 门禁 2：捕获当前版本号 ========
+    const capturedVersion = _queueVersion;
+    if (capturedVersion === 0) return;
+
+    // ======== 核心逻辑：判断错误是否来自占位符轨道 ========
     try {
-      const activeIndex = await TrackPlayer.getActiveTrackIndex();
-      const queue = await TrackPlayer.getQueue();
-      const activeTrack = typeof activeIndex === 'number' ? queue[activeIndex] : undefined;
-      if (activeTrack && typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')) {
-        LoggerService.info('TrackPlayer', 'PlaybackError', 'Ignoring placeholder track playback error, will auto-resume after resolve');
-        // 设置自动恢复标志，等待 lazyResolve 完成后恢复播放
+      const activeTrack = await TrackPlayer.getActiveTrack();
+      if (!guardVersion(capturedVersion, 'PlaybackError:postActiveTrack')) return;
+
+      if (
+        activeTrack &&
+        typeof activeTrack.url === 'string' &&
+        activeTrack.url.startsWith('placeholder://')
+      ) {
+        LoggerService.info(
+          'TrackPlayer',
+          'PlaybackError',
+          '检测到占位符轨道播放错误，触发补解析',
+        );
+
+        // 仅设置恢复标志，不传递 autoPlay=true
+        // 真正是否播放由 lazyResolve 内部的 shouldResumePlay 三段判定决定
         _pendingAutoPlayAfterResolve = true;
-        // 主动触发解析（带 autoPlayActive=true）；若已在解析中则防并发，
-        // 由上面的标志位在 lazyResolve 完成时触发自动播放
-        if (typeof activeIndex === 'number') {
-          lazyResolve(activeIndex, true).catch(() => {
-            // 若解析失败，尝试直接调用 play() 恢复
+
+        const activeIndex = await TrackPlayer.getActiveTrackIndex();
+        if (!guardVersion(capturedVersion, 'PlaybackError:postActiveIndex')) return;
+
+        if (typeof activeIndex === 'number' && activeIndex >= 0) {
+          // 【v2新增】二次确认：activeTrack 的 id 与 activeIndex 位置的轨道 id 一致
+          const queue = await TrackPlayer.getQueue();
+          if (!guardVersion(capturedVersion, 'PlaybackError:postGetQueue')) return;
+
+          const trackAtIndex = queue[activeIndex];
+          if (!trackAtIndex || trackAtIndex.id !== activeTrack.id) {
+            LoggerService.info(
+              'TrackPlayer',
+              'PlaybackError',
+              `索引不一致 (activeTrack.id=${activeTrack.id}, queue[${activeIndex}].id=${trackAtIndex?.id})，放弃补解析`,
+            );
+            return;
+          }
+
+          // autoPlay 缺省 = false，由 _pendingAutoPlayAfterResolve 标志驱动恢复播放
+          lazyResolve(activeIndex, { version: capturedVersion }).catch(() => {
+            // 解析失败时的兜底：尝试直接恢复播放
             if (_pendingAutoPlayAfterResolve) {
               _pendingAutoPlayAfterResolve = false;
               TrackPlayer.play().catch(() => {});
@@ -650,19 +945,18 @@ export async function PlaybackService() {
         return;
       }
     } catch (e) {
-      // If inspection fails, proceed with generic error handling.
+      // 检查失败，走通用错误处理
     }
-    
+
+    // ======== 通用错误处理路径 ========
     LoggerService.error('TrackPlayer', 'PlaybackError', '播放错误:', error);
-    
-    // 【修复】如果当前无网络，暂停播放而不是跳过
+
     if (netStatus.type === 'none') {
-      // 通过 Zustand store 设置全局 UI 错误提示
       usePlayerStore.getState().setPlaybackError('网络已断开，播放暂停');
       await TrackPlayer.pause();
       return;
     }
-    
+
     await TrackPlayer.skipToNext().catch(() => {});
   });
 }
@@ -677,28 +971,28 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
   const currentQueue = await TrackPlayer.getQueue();
   const placeholderUrl = `placeholder://${bvid}-${cid}`;
   const quality = useSettingsStore.getState().quality;
-  
+
   if (expandMultiPart) {
     // 展开模式：查找队列中已存在的分P轨道（按 id 和 cid 匹配）
     // 兼容未解析的 placeholder 和已解析的 file:// 轨道
     const existingIndex = currentQueue.findIndex(
       t => t.id === bvid && ((t as any).cid === cid || t.url === placeholderUrl)
     );
-    
+
     if (existingIndex !== -1) {
       await TrackPlayer.skip(existingIndex);
       await TrackPlayer.play();
       usePlayerStore.getState().setCurrentCid(cid);
       return;
     }
-    
+
     // 队列中不存在该分P，在当前位置后插入
     const rawIdx = await TrackPlayer.getActiveTrackIndex();
     const idx = typeof rawIdx === 'number' ? rawIdx : -1;
     const insertPos = idx >= 0 ? idx + 1 : 0;
-    
+
     const info = await audioService.getInfo(bvid, quality, cid);
-    
+
     await TrackPlayer.add({
       id: bvid,
       url: placeholderUrl,
@@ -708,7 +1002,7 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
       duration: info.parts?.find((p: any) => p.cid === cid)?.duration ?? info.duration,
       cid,
     }, insertPos);
-    
+
     await TrackPlayer.skip(insertPos);
     await TrackPlayer.play();
     usePlayerStore.getState().setCurrentCid(cid);

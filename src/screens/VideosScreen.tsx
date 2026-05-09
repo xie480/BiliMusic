@@ -267,12 +267,16 @@ export const VideosScreen = ({ route, navigation }: any) => {
 
       // 立即使用当前已加载的列表数据构建播放队列（零网络请求）
       setQueue(displayedList, target.bvid, context);
-      await loadQueue(displayedList, target.bvid);
 
-      // 立即导航到播放器页面，消除阻塞等待感
+      // 【关键修复】立即导航，不等待 loadQueue Bridge 调用完成
+      // PlayerScreen 使用 playerStore 中的 currentVideo 作为后备渲染，
+      // 在 TrackPlayer 还未就绪时显示歌曲信息，避免"未播放"闪烁
       navigation.navigate('Player');
 
-      // 立即开始播放当前轨道
+      // loadQueue 不再内置 lazyResolve，仅建队列 + 跳转到目标索引
+      await loadQueue(displayedList, target.bvid);
+
+      // 显式播放：触发 PlaybackActiveTrackChanged → 事件处理器 → lazyResolve（静默）
       await TrackPlayer.play();
 
       // 后台异步加载更多数据并追加到队列尾部
@@ -304,8 +308,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
       const target = currentList[0];
       const context = { folderId: mediaId, sortOption, searchQuery };
       setQueue(currentList, target.bvid, context);
-      await loadQueue(currentList, target.bvid);
       navigation.navigate('Player');
+      await loadQueue(currentList, target.bvid);
       await TrackPlayer.play();
 
       usePlayerStore.getState().setQueueLoading(true);
@@ -334,9 +338,9 @@ export const VideosScreen = ({ route, navigation }: any) => {
       
       usePlayerStore.getState().setPlayMode('shuffle');
       setQueue(shuffled, target.bvid, context);
+      navigation.navigate('Player');
       await loadQueue(shuffled, target.bvid);
       await TrackPlayer.play();
-      navigation.navigate('Player');
     } catch (e: any) {
       const msg = e.message || '随机播放失败';
       if (Platform.OS === 'android') {
