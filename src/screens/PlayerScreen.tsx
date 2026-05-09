@@ -333,7 +333,18 @@ export const PlayerScreen = () => {
 
   const hasMultiParts = currentVideo?.parts && currentVideo.parts.length > 1;
 
+  const [dragPosition, setDragPosition] = useState<number | null>(null);
+
+  const onSeekStart = () => {
+    setDragPosition(progressPosition);
+  };
+
+  const onSeekUpdate = (p: number) => {
+    setDragPosition(p * progressDuration);
+  };
+
   const onSeekEnd = (p: number) => {
+    setDragPosition(null);
     TrackPlayer.seekTo(p * progressDuration);
   };
 
@@ -359,9 +370,14 @@ export const PlayerScreen = () => {
         <View style={[STATIC_STYLES.body, { alignItems: 'center', paddingHorizontal: t.spacing.xl }]}>
           <FastImage source={{ uri: track.artwork as string }} style={dynamicStyles.cover} />
           <View style={dynamicStyles.progressBox}>
-            <ProgressBar progress={progressDuration > 0 ? progressPosition / progressDuration : 0} onSeekEnd={onSeekEnd} />
+            <ProgressBar
+              progress={progressDuration > 0 ? progressPosition / progressDuration : 0}
+              onSeekStart={onSeekStart}
+              onSeekUpdate={onSeekUpdate}
+              onSeekEnd={onSeekEnd}
+            />
             <View style={STATIC_STYLES.timeRow}>
-              <Text style={dynamicStyles.time}>{formatDuration(progressPosition)}</Text>
+              <Text style={dynamicStyles.time}>{formatDuration(dragPosition !== null ? dragPosition : progressPosition)}</Text>
               <Text style={dynamicStyles.time}>{formatDuration(progressDuration)}</Text>
             </View>
           </View>

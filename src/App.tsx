@@ -19,6 +19,7 @@ import { PlayerScreen } from './screens/PlayerScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { SoundLabScreen } from './screens/SoundLabScreen';
 import { VisibleFoldersScreen } from './screens/VisibleFoldersScreen';
+import { NoCacheFoldersScreen } from './screens/NoCacheFoldersScreen';
 import { SplashScreen } from './screens/SplashScreen';
 import { SyncDetailsScreen } from './screens/SyncDetailsScreen';
 import { favoriteService, loadGlobalIndexCache } from './services/favoriteService';
@@ -51,6 +52,7 @@ const PlayerScreenWithBg = withBackground(PlayerScreen);
 const SettingsScreenWithBg = withBackground(SettingsScreen);
 const SoundLabScreenWithBg = withBackground(SoundLabScreen);
 const VisibleFoldersScreenWithBg = withBackground(VisibleFoldersScreen);
+const NoCacheFoldersScreenWithBg = withBackground(NoCacheFoldersScreen);
 const SplashScreenWithBg = withBackground(SplashScreen);
 const SyncDetailsScreenWithBg = withBackground(SyncDetailsScreen);
 
@@ -233,6 +235,7 @@ export default function App() {
                 <Stack.Screen name="Settings" component={SettingsScreenWithBg} />
                 <Stack.Screen name="SoundLab" component={SoundLabScreenWithBg} />
                 <Stack.Screen name="VisibleFolders" component={VisibleFoldersScreenWithBg} />
+                <Stack.Screen name="NoCacheFolders" component={NoCacheFoldersScreenWithBg} />
                 <Stack.Screen name="SyncDetails" component={SyncDetailsScreenWithBg} />
               </Stack.Navigator>
             </NavigationContainer>

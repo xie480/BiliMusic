@@ -320,15 +320,21 @@ class LoggerService {
         }
       }
 
-      // 写入临时导出文件
-      await RNFS.writeFile(exportPath, combinedContent, 'utf8');
+      if (Platform.OS === 'android') {
+        const downloadPath = `${RNFS.DownloadDirectoryPath}/BiliMusic_logs_export_${Date.now()}.txt`;
+        await RNFS.writeFile(downloadPath, combinedContent, 'utf8');
+        ToastAndroid.show(`日志已导出至: ${downloadPath}`, ToastAndroid.LONG);
+      } else {
+        // 写入临时导出文件
+        await RNFS.writeFile(exportPath, combinedContent, 'utf8');
 
-      // 使用系统分享
-      await Share.share({
-        title: 'BiliMusic 运行日志',
-        message: '请查收 BiliMusic 应用运行日志文件',
-        url: Platform.OS === 'android' ? `file://${exportPath}` : exportPath,
-      });
+        // 使用系统分享
+        await Share.share({
+          title: 'BiliMusic 运行日志',
+          message: '请查收 BiliMusic 应用运行日志文件',
+          url: exportPath,
+        });
+      }
 
       this.info('LoggerService', 'exportLogs', '日志导出成功');
       return true;

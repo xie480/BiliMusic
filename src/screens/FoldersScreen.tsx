@@ -262,6 +262,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                 paddingVertical: t.spacing.sm,
                 paddingHorizontal: t.spacing.lg,
                 backgroundColor: t.colors.surface,
+                borderRadius: t.radius.lg,
               }}
               onPress={async () => {
                 const video = filteredVideos[index];

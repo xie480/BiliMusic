@@ -55,9 +55,11 @@ export const SettingsScreen = ({ navigation }: any) => {
   const {
     quality, autoCacheOnWifi, wifiOnly, hiddenFolderIds,
     expandMultiPart, themeMode, customBackgroundImage, glassBlurAmount,
+    mixWithOthers,
     setQuality, setAutoCacheOnWifi,
     setWifiOnly, setExpandMultiPart, setThemeMode,
     setCustomBackgroundImage, setGlassBlurAmount,
+    setMixWithOthers,
   } = useSettingsStore();
   // UID management moved to authStore (userId, userInfo)
 
@@ -260,6 +262,8 @@ export const SettingsScreen = ({ navigation }: any) => {
         ) : (
           <Text style={s.saveText} onPress={triggerLogin}>点击登录</Text>
         )}
+
+        
       </View>
         <Text style={s.section}>UI</Text>
         {isGlass && (
@@ -321,6 +325,61 @@ export const SettingsScreen = ({ navigation }: any) => {
           </>
         )}
 
+               <Text style={s.section}>全局索引</Text>
+        <View style={s.group}>
+          <ListItem
+            title="可见收藏夹偏好"
+            onPress={() => navigation.navigate('VisibleFolders')}
+            showArrow
+          />
+          <View style={s.sep} />
+          <ListItem
+            title="同步全局索引"
+            subtitle={
+              syncStatus === 'syncing'
+                ? progressData
+                  ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
+                  : '正在获取收藏夹列表...'
+                : syncStatus === 'error'
+                ? `同步失败: ${syncError}`
+                : syncStatus === 'done'
+                ? `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 视频)`
+                : `当前已索引 ${globalIndexCount} 个视频`
+            }
+            onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
+            right={
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
+                {syncStatus === 'syncing' ? (
+                  <Button title="取消" variant="text" onPress={abortSync} />
+                ) : syncStatus === 'error' ? (
+                  <Text style={{ color: t.colors.error, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>重试</Text>
+                ) : (
+                  <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>开始同步</Text>
+                )}
+              </View>
+            }
+          />
+          {syncStatus === 'syncing' && (
+            <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
+              <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>
+                <View
+                  style={{
+                    height: '100%',
+                    backgroundColor: t.colors.primary,
+                    width: progressData ? `${(progressData.processedVideos / Math.max(1, progressData.totalVideos)) * 100}%` : '0%',
+                  }}
+                />
+              </View>
+              <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
+                · B站限流可能导致同步较慢，请耐心等待
+                · 建议在WIFI环境下完成同步，避免中途停止
+                · 最终结果可能因失效视频与总数存在差异
+              </Text>
+            </View>
+          )}
+        </View>
+
         <Text style={s.section}>音效</Text>
         <View style={s.group}>
           <ListItem
@@ -377,61 +436,12 @@ export const SettingsScreen = ({ navigation }: any) => {
             title="将分P列表加入播放列表"
             right={<Switch value={expandMultiPart} onValueChange={setExpandMultiPart} />}
           />
-        </View>
-
-        <Text style={s.section}>全局索引</Text>
-        <View style={s.group}>
-          <ListItem
-            title="可见收藏夹偏好"
-            onPress={() => navigation.navigate('VisibleFolders')}
-            showArrow
-          />
           <View style={s.sep} />
           <ListItem
-            title="同步全局索引"
-            subtitle={
-              syncStatus === 'syncing'
-                ? progressData
-                  ? `${progressData.completedTasks}/${progressData.totalTasks} 任务, ${progressData.processedVideos}/${progressData.totalVideos} 视频`
-                  : '正在获取收藏夹列表...'
-                : syncStatus === 'error'
-                ? `同步失败: ${syncError}`
-                : syncStatus === 'done'
-                ? `同步完成 (${globalIndexCount}/${progressData?.totalVideos ?? globalIndexCount} 视频)`
-                : `当前已索引 ${globalIndexCount} 个视频`
-            }
-            onPress={syncStatus === 'syncing' ? undefined : onSyncGlobalIndex}
-            right={
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Button title="查看" variant="text" onPress={() => navigation.navigate('SyncDetails')} />
-                {syncStatus === 'syncing' ? (
-                  <Button title="取消" variant="text" onPress={abortSync} />
-                ) : syncStatus === 'error' ? (
-                  <Text style={{ color: t.colors.error, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>重试</Text>
-                ) : (
-                  <Text style={{ color: t.colors.primary, fontSize: t.fontSize.base, marginLeft: t.spacing.sm }}>开始同步</Text>
-                )}
-              </View>
-            }
+            title="与其他应用同时播放"
+            subtitle="允许与其他应用的音频混合播放"
+            right={<Switch value={mixWithOthers} onValueChange={setMixWithOthers} />}
           />
-          {syncStatus === 'syncing' && (
-            <View style={{ paddingHorizontal: t.spacing.lg, paddingBottom: t.spacing.md }}>
-              <View style={{ height: 4, backgroundColor: t.colors.divider, borderRadius: 2, overflow: 'hidden' }}>
-                <View
-                  style={{
-                    height: '100%',
-                    backgroundColor: t.colors.primary,
-                    width: progressData ? `${(progressData.processedVideos / Math.max(1, progressData.totalVideos)) * 100}%` : '0%',
-                  }}
-                />
-              </View>
-              <Text style={{ color: t.colors.textHint, fontSize: t.fontSize.xs, marginTop: t.spacing.sm }}>
-                · B站限流可能导致同步较慢，请耐心等待
-                · 建议在WIFI环境下完成同步，避免中途停止
-                · 最终结果可能因失效视频与总数存在差异
-              </Text>
-            </View>
-          )}
         </View>
 
         <Text style={s.section}>缓存</Text>
@@ -443,6 +453,13 @@ export const SettingsScreen = ({ navigation }: any) => {
                 {cacheCount}首 / {formatBytes(cacheSize)}
               </Text>
             }
+          />
+          <View style={s.sep} />
+          <ListItem
+            title="无缓存收藏夹"
+            subtitle="选中的收藏夹将不会自动缓存"
+            onPress={() => navigation.navigate('NoCacheFolders')}
+            showArrow
           />
           <View style={s.sep} />
           <ListItem
@@ -505,6 +522,7 @@ export const SettingsScreen = ({ navigation }: any) => {
           <ListItem
             title="项目 Github 地址"
             subtitle="如果觉得好用的话，求求给个Star~"
+            icon="github"
             onPress={() => Linking.openURL('https://github.com/xie480/Nyami.git')}
             showArrow
           />

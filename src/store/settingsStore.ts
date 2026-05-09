@@ -21,6 +21,8 @@ interface Settings {
   themeMode: ThemeMode;
   customBackgroundImage: string | null;
   glassBlurAmount: number;
+  mixWithOthers: boolean;
+  noCacheFolderIds: number[];
 }
 
 interface SettingsState extends Settings {
@@ -32,6 +34,8 @@ interface SettingsState extends Settings {
   setThemeMode: (mode: ThemeMode) => void;
   setCustomBackgroundImage: (uri: string | null) => void;
   setGlassBlurAmount: (v: number) => void;
+  setMixWithOthers: (v: boolean) => void;
+  setNoCacheFolderIds: (ids: number[]) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -45,6 +49,8 @@ export const useSettingsStore = create<SettingsState>()(
       themeMode: 'glass-dark',
       customBackgroundImage: null,
       glassBlurAmount: 28,
+      mixWithOthers: false,
+      noCacheFolderIds: [],
       setQuality: (q) => set({ quality: q }),
       setAutoCacheOnWifi: (v) => set({ autoCacheOnWifi: v }),
       setWifiOnly: (v) => set({ wifiOnly: v }),
@@ -53,6 +59,8 @@ export const useSettingsStore = create<SettingsState>()(
       setThemeMode: (mode) => set({ themeMode: mode }),
       setCustomBackgroundImage: (uri) => set({ customBackgroundImage: uri }),
       setGlassBlurAmount: (v) => set({ glassBlurAmount: v }),
+      setMixWithOthers: (v) => set({ mixWithOthers: v }),
+      setNoCacheFolderIds: (ids) => set({ noCacheFolderIds: ids }),
     }),
     {
       name: 'settingsStore',

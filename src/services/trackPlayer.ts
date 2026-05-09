@@ -1,5 +1,6 @@
 import TrackPlayer, {
   AppKilledPlaybackBehavior, Capability, Event,
+  IOSCategory, IOSCategoryMode, IOSCategoryOptions
 } from 'react-native-track-player';
 import { AppState } from 'react-native';
 import LoggerService from './LoggerService';
@@ -88,7 +89,13 @@ function guardVersion(version: number, label: string): boolean {
 export async function setupPlayer() {
   if (_ready) return;
   try {
-    await TrackPlayer.setupPlayer({ autoHandleInterruptions: true });
+    const mixWithOthers = useSettingsStore.getState().mixWithOthers;
+    await TrackPlayer.setupPlayer({
+      autoHandleInterruptions: true,
+      iosCategory: IOSCategory.Playback,
+      iosCategoryMode: IOSCategoryMode.Default,
+      iosCategoryOptions: mixWithOthers ? [IOSCategoryOptions.MixWithOthers] : [],
+    });
     await TrackPlayer.updateOptions({
       android: {
         appKilledPlaybackBehavior:
@@ -584,14 +591,17 @@ async function lazyResolve(
 
     // 记录轨道开始加载时间
     performanceMonitor.start(bvid);
-    const quality = useSettingsStore.getState().quality;
+    const { quality, noCacheFolderIds } = useSettingsStore.getState();
     const cacheKey = cid ? `${bvid}-${cid}` : bvid;
+
+    const videoInQueue = usePlayerStore.getState().queue.find(v => v.bvid === bvid);
+    const isNoCache = videoInQueue?.folderIds?.some(id => noCacheFolderIds?.includes(id)) ?? false;
 
     let url = '';
     let headers: Record<string, string> | undefined;
     let resolvedInfo: any = undefined;
 
-    const cachedPath = await audioCache.has(cacheKey, quality);
+    const cachedPath = !isNoCache ? await audioCache.has(cacheKey, quality) : null;
     if (cachedPath) {
       url = `file://${cachedPath}`;
     } else {
@@ -613,10 +623,12 @@ async function lazyResolve(
               'User-Agent': config.userAgent,
             };
             setCachedUrl(bvid, url, headers, cid ?? resolvedInfo.cid);
-            audioCache.download(cacheKey, quality, resolvedInfo.audio.baseUrl, {
-              Referer: config.referer,
-              'User-Agent': config.userAgent,
-            }).catch(() => {});
+            if (!isNoCache) {
+              audioCache.download(cacheKey, quality, resolvedInfo.audio.baseUrl, {
+                Referer: config.referer,
+                'User-Agent': config.userAgent,
+              }).catch(() => {});
+            }
             resolveSuccess = true;
             break;
           } catch (error) {
@@ -808,6 +820,11 @@ async function lazyResolve(
 async function autoCache(bvid: string, cid?: number) {
   const s = useSettingsStore.getState();
   if (!s.autoCacheOnWifi || !netStatus.isWifi()) return;
+  
+  const videoInQueue = usePlayerStore.getState().queue.find(v => v.bvid === bvid);
+  const isNoCache = videoInQueue?.folderIds?.some(id => s.noCacheFolderIds?.includes(id)) ?? false;
+  if (isNoCache) return;
+
   const cacheKey = cid ? `${bvid}-${cid}` : bvid;
   if (await audioCache.has(cacheKey, s.quality)) return;
   try {
