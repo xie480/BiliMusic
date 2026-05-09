@@ -17,6 +17,7 @@ import { Header } from '../components/Header';
 import { useSelectionStore } from '../store/selectionStore';
 import TrackPlayer from 'react-native-track-player';
 import { usePlayerStore } from '../store/playerStore';
+import { useProgressStore } from '../store/progressStore';
 import { ListItem } from '../components/ListItem';
 import { IconButton } from '../components/IconButton';
 import { Loading } from '../components/Loading';
@@ -25,8 +26,9 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { appendQueue as tpAppendQueue, loadQueue, playWithIntent } from '../services/trackPlayer';
+import { appendQueue as tpAppendQueue, loadQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { useAuthStore } from '../store/authStore';
+import { prefetchAudioUrl } from '../services/dataPrefetcher';
 import { useSettingsStore } from '../store/settingsStore';
 import { useSyncStore } from '../store/syncStore';
 import { useTheme } from '../theme';
@@ -135,9 +137,19 @@ export const FoldersScreen = ({ navigation }: any) => {
       return;
     }
     setQueue(shuffled, shuffled[0]?.bvid);
-    await loadQueue(shuffled, shuffled[0]?.bvid);
+    // ======== 【P0防闪烁优化】跳转前清空旧播放上下文 ========
+    usePlayerStore.getState().setResolving(true);
+    useProgressStore.getState().resetProgress();
+    // 【P0性能优化】极速并发预取：与 loadQueue Bridge 调用并行执行
+    const target = shuffled[0];
+    if (target) {
+      prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
+    }
+    const version = await loadQueue(shuffled, shuffled[0]?.bvid);
     // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
     await playWithIntent();
+    // 【P0性能优化】主动触发解析，跳过 PlaybackError 等待
+    resolveCurrentTrack(version).catch(() => {});
     navigation.navigate('Player');
   };
 
@@ -229,6 +241,11 @@ export const FoldersScreen = ({ navigation }: any) => {
           maxToRenderPerBatch={10}
           windowSize={5}
           initialNumToRender={10}
+          getItemLayout={(_data, index) => ({
+            length: 96,
+            offset: 96 * index,
+            index,
+          })}
           // =================================
           ItemSeparatorComponent={() => <View style={{ height: t.spacing.md }} />}
           renderItem={({ item, index }) => (
@@ -244,16 +261,18 @@ export const FoldersScreen = ({ navigation }: any) => {
                 const video = filteredVideos[index];
                 if (!video) return;
                 try {
-                  // 【修复】限制搜索队列大小（最多 100 首），避免 Bridge 过载
                   const MAX_QUEUE = 100;
                   const queueVideos = filteredVideos.length > MAX_QUEUE
                     ? filteredVideos.slice(0, MAX_QUEUE)
                     : filteredVideos;
-                  // 【修复E】先更新 store，同步加载队列，再显式触发播放
                   setQueue(queueVideos, video.bvid);
-                  await loadQueue(queueVideos, video.bvid);
-                  // 【修复E】显式调用 play()，不再依赖 _pendingPlay 事件标志
+                  // 【P0防闪烁优化】跳转前清空旧播放上下文
+                  usePlayerStore.getState().setResolving(true);
+                  useProgressStore.getState().resetProgress();
+                  prefetchAudioUrl(video.bvid, video.parts?.[0]?.cid).catch(() => {});
+                  const version = await loadQueue(queueVideos, video.bvid);
                   await playWithIntent();
+                  resolveCurrentTrack(version).catch(() => {});
                   navigation.navigate('Player');
                 } catch (e: any) {
                   const msg = e.message || '播放失败';
@@ -262,6 +281,7 @@ export const FoldersScreen = ({ navigation }: any) => {
                   } else {
                     Alert.alert('播放错误', msg);
                   }
+                  usePlayerStore.getState().setResolving(false);
                 }
               }}
             >
@@ -332,6 +352,11 @@ export const FoldersScreen = ({ navigation }: any) => {
           maxToRenderPerBatch={10}
           windowSize={5}
           initialNumToRender={10}
+          getItemLayout={(_data, index) => ({
+            length: 72,
+            offset: 72 * index,
+            index,
+          })}
           // =================================
           ListHeaderComponent={
             <View

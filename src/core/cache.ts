@@ -6,6 +6,9 @@ interface Entry<T> {
   lastAccess: number;
 }
 
+/** 用于 Promise 去重的挂起请求映射表 */
+const pendingFetchers = new Map<string, Promise<any>>();
+
 class TTLCache {
   private mem = new Map<string, Entry<any>>();
   private readonly maxEntries = 200; // 内存中最多 200 条
@@ -87,6 +90,13 @@ class TTLCache {
 
   /**
    * getOrSet 一站式：缓存命中则返回，否则调用 fetcher 并写入
+   *
+   * 【性能优化】Promise 去重：如果同一个 key 对应的 fetcher 已在执行中，
+   * 后续的并发请求直接复用该 Promise，避免重复网络请求。
+   * 这对于 eager prefetch + lazyResolve 的并发场景至关重要：
+   *   1. VideosScreen 点击时调用 prefetchAudioUrl 启动网络请求
+   *   2. loadQueue + playWithIntent 完成后，resolveCurrentTrack 内部也调用 getInfo
+   *   3. 步骤 2 会直接复用步骤 1 的 Promise，无需发起第二次网络请求
    */
   async getOrSet<T>(
     key: string,
@@ -97,9 +107,24 @@ class TTLCache {
     const hit = this.get<T>(key, persist);
     if (hit !== undefined) return hit;
 
-    const value = await fetcher();
-    this.set(key, value, ttl, persist);
-    return value;
+    // Promise 去重：如果同一 key 已有挂起的 fetcher，直接复用
+    const pendingKey = `__pending:${key}`;
+    const existing = pendingFetchers.get(pendingKey);
+    if (existing) return existing as Promise<T>;
+
+    const promise = fetcher()
+      .then((value) => {
+        this.set(key, value, ttl, persist);
+        pendingFetchers.delete(pendingKey);
+        return value;
+      })
+      .catch((err) => {
+        pendingFetchers.delete(pendingKey);
+        throw err;
+      });
+
+    pendingFetchers.set(pendingKey, promise);
+    return promise;
   }
 }
 

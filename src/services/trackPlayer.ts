@@ -836,6 +836,8 @@ export async function resumePlayback(): Promise<void> {
       activeTrack.url.startsWith('placeholder://');
 
     if (isPlaceholder) {
+      // 【P0性能优化】乐观加载状态：占位符恢复播放时立即显示加载动画
+      usePlayerStore.getState().setResolving(true);
       const activeIndex = await TrackPlayer.getActiveTrackIndex();
       if (typeof activeIndex === 'number' && activeIndex >= 0) {
         // 传入 autoPlay: true，解析完成后自动播放
@@ -859,10 +861,14 @@ export async function PlaybackService() {
   TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.stop());
   // 【修复二】锁屏/通知栏切歌时同步触发播放，暂停状态下切歌自动恢复播放
   TrackPlayer.addEventListener(Event.RemoteNext, async () => {
+    // 【P0性能优化】乐观加载状态：切歌时立即显示加载动画
+    usePlayerStore.getState().setResolving(true);
     await TrackPlayer.skipToNext();
     await TrackPlayer.play();
   });
   TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
+    // 【P0性能优化】乐观加载状态：切歌时立即显示加载动画
+    usePlayerStore.getState().setResolving(true);
     await TrackPlayer.skipToPrevious();
     await TrackPlayer.play();
   });
@@ -966,6 +972,11 @@ export async function PlaybackService() {
       } else {
         usePlayerStore.getState().setCurrentCid(null);
       }
+
+      // ======== 【P0性能优化】清除加载状态 ========
+      // 既然轨道已解析（含有真实 URL），立即清除 isResolving，
+      // 让播放按钮从加载动画平滑过渡到暂停/播放图标
+      usePlayerStore.getState().setResolving(false);
 
       prefetchNextTracks(actualIndex).catch(() => {});
       if (e.lastTrack?.id) autoCache(e.lastTrack.id as string);
@@ -1116,6 +1127,8 @@ export async function PlaybackService() {
  * - 不展开模式：替换当前播放轨道，保持队列结构不变
  */
 export async function playSpecificPart(bvid: string, cid: number, partTitle: string) {
+  // 【P0性能优化】乐观加载状态：切换分P时立即显示加载动画
+  usePlayerStore.getState().setResolving(true);
   const expandMultiPart = useSettingsStore.getState().expandMultiPart;
   const currentQueue = await TrackPlayer.getQueue();
   const placeholderUrl = `placeholder://${bvid}-${cid}`;

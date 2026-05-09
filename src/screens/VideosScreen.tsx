@@ -26,8 +26,10 @@ import { ErrorView } from '../components/ErrorView';
 import { MiniPlayer } from '../components/MiniPlayer';
 import { Button } from '../components/Button';
 import { favoriteService } from '../services';
-import { loadQueue, insertNext, appendQueue as tpAppendQueue, playWithIntent } from '../services/trackPlayer';
+import { loadQueue, insertNext, appendQueue as tpAppendQueue, playWithIntent, resolveCurrentTrack } from '../services/trackPlayer';
 import { usePlayerStore } from '../store/playerStore';
+import { useProgressStore } from '../store/progressStore';
+import { prefetchAudioUrl } from '../services/dataPrefetcher';
 import { formatDuration } from '../utils/format';
 import { useTheme } from '../theme';
 import { useSyncStore } from '../store/syncStore';
@@ -268,21 +270,52 @@ export const VideosScreen = ({ route, navigation }: any) => {
       // 立即使用当前已加载的列表数据构建播放队列（零网络请求）
       setQueue(displayedList, target.bvid, context);
 
+      // ======== 【P0防闪烁优化】跳转前清空旧播放上下文 ========
+      // 1. 重置进度数据：清除上一首歌曲的位置/时长残留，防止 PlayerScreen 挂载时
+      //    进度条短暂显示旧数据（10-200ms 闪烁窗口期）
+      // 2. 设置 isResolving=true：PlayerScreen 据此使用 fallbackTrack 而非旧 activeTrack
+      usePlayerStore.getState().setResolving(true);
+      useProgressStore.getState().resetProgress();
+
+      // ======== 【P0性能优化】极速并发预取 ========
+      // 在 loadQueue（Bridge 调用，耗时）执行的同时，发起网络请求获取真实音频 URL。
+      // 两者完全并行：Bridge 和网络请求互不阻塞。
+      // Promise 去重（cache.ts）确保后续 resolveCurrentTrack 的 getInfo 调用
+      // 直接复用此 Promise，而非发起第二次网络请求。
+      prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
+      // ↑ fire-and-forget，不阻塞主流程，网络请求在后台与 Bridge 并行执行
+
       // 【关键修复】立即导航，不等待 loadQueue Bridge 调用完成
       // PlayerScreen 使用 playerStore 中的 currentVideo 作为后备渲染，
       // 在 TrackPlayer 还未就绪时显示歌曲信息，避免"未播放"闪烁
       navigation.navigate('Player');
 
-      // loadQueue 不再内置 lazyResolve，仅建队列 + 跳转到目标索引
-      await loadQueue(displayedList, target.bvid);
+      // ======== 【P0动画优化】将高耗时 Bridge 操作延迟到路由动画完成后执行 ========
+      // loadQueue（全量 reset + addTracksBatched + skip）和 playWithIntent
+      // 都是 React Native Bridge 调用，在主线程上执行时会阻塞 JS 线程。
+      // 如果导航动画尚未完成，这些操作会抢占主线程导致丢帧卡顿。
+      // 使用 InteractionManager.runAfterInteractions 确保路由过渡动画
+      // 优先完成，再执行这些耗时操作。
+      InteractionManager.runAfterInteractions(async () => {
+        // loadQueue 不再内置 lazyResolve，仅建队列 + 跳转到目标索引
+        const version = await loadQueue(displayedList, target.bvid);
 
-      // 显式播放：触发 PlaybackActiveTrackChanged → 事件处理器 → lazyResolve（静默）
-      await playWithIntent();
+        // 显式播放 + 主动解析：不再被动等待 PlaybackError 事件
+        await playWithIntent();
 
-      // 后台异步加载更多数据并追加到队列尾部
-      usePlayerStore.getState().setQueueLoading(true);
-      loadMoreInBackground().catch(() => {
-        usePlayerStore.getState().setQueueLoading(false);
+        // ======== 【P0性能优化】主动触发解析 ========
+        // 主动调用 resolveCurrentTrack，直接触发 lazyResolve。
+        // lazyResolve 会先查 urlCache（预取结果可能已就绪），
+        // 若预取未完成则通过 Promise 去重复用预取的网络请求。
+        // 完全跳过 PlaybackError 事件的等待周期（通常 100-300ms），
+        // 从"等报错再处理"进化为"主动快速处理"。
+        resolveCurrentTrack(version).catch(() => {});
+
+        // 后台异步加载更多数据并追加到队列尾部
+        usePlayerStore.getState().setQueueLoading(true);
+        loadMoreInBackground().catch(() => {
+          usePlayerStore.getState().setQueueLoading(false);
+        });
       });
     } catch (e: any) {
       const msg = e.message || '播放失败';
@@ -292,6 +325,8 @@ export const VideosScreen = ({ route, navigation }: any) => {
         Alert.alert('播放错误', msg);
       }
       usePlayerStore.getState().setQueueLoading(false);
+      // 发生错误时清除乐观加载状态
+      usePlayerStore.getState().setResolving(false);
     }
   }, [displayedList, mediaId, sortOption, searchQuery, loadMoreInBackground]);
 
@@ -308,13 +343,22 @@ export const VideosScreen = ({ route, navigation }: any) => {
       const target = currentList[0];
       const context = { folderId: mediaId, sortOption, searchQuery };
       setQueue(currentList, target.bvid, context);
+      // 【P0防闪烁优化】跳转前清空旧播放上下文
+      usePlayerStore.getState().setResolving(true);
+      useProgressStore.getState().resetProgress();
+      // 【P0性能优化】极速并发预取
+      prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
-      await loadQueue(currentList, target.bvid);
-      await playWithIntent();
+      // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
+      InteractionManager.runAfterInteractions(async () => {
+        const version = await loadQueue(currentList, target.bvid);
+        await playWithIntent();
+        resolveCurrentTrack(version).catch(() => {});
 
-      usePlayerStore.getState().setQueueLoading(true);
-      loadMoreInBackground().catch(() => {
-        usePlayerStore.getState().setQueueLoading(false);
+        usePlayerStore.getState().setQueueLoading(true);
+        loadMoreInBackground().catch(() => {
+          usePlayerStore.getState().setQueueLoading(false);
+        });
       });
     } catch (e: any) {
       const msg = e.message || '播放全部失败';
@@ -324,6 +368,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
         Alert.alert('播放错误', msg);
       }
       usePlayerStore.getState().setQueueLoading(false);
+      usePlayerStore.getState().setResolving(false);
     }
   }, [displayedList, playFrom]);
 
@@ -338,9 +383,18 @@ export const VideosScreen = ({ route, navigation }: any) => {
       
       usePlayerStore.getState().setPlayMode('shuffle');
       setQueue(shuffled, target.bvid, context);
+      // 【P0防闪烁优化】跳转前清空旧播放上下文
+      usePlayerStore.getState().setResolving(true);
+      useProgressStore.getState().resetProgress();
+      // 【P0性能优化】极速并发预取
+      prefetchAudioUrl(target.bvid, target.parts?.[0]?.cid).catch(() => {});
       navigation.navigate('Player');
-      await loadQueue(shuffled, target.bvid);
-      await playWithIntent();
+      // 【P0动画优化】高耗时 Bridge 操作延迟到路由动画完成后执行
+      InteractionManager.runAfterInteractions(async () => {
+        const version = await loadQueue(shuffled, target.bvid);
+        await playWithIntent();
+        resolveCurrentTrack(version).catch(() => {});
+      });
     } catch (e: any) {
       const msg = e.message || '随机播放失败';
       if (Platform.OS === 'android') {
@@ -348,6 +402,7 @@ export const VideosScreen = ({ route, navigation }: any) => {
       } else {
         Alert.alert('播放错误', msg);
       }
+      usePlayerStore.getState().setResolving(false);
     }
   }, [displayedList, playFrom]);
 

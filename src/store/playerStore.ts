@@ -4,6 +4,7 @@ import type { FavoriteVideo } from '../types/domain';
 import { storage } from '../core/storage';
 import TrackPlayer from 'react-native-track-player';
 import { loadQueue, insertNext as tpInsertNext, removeFromQueue as tpRemoveFromQueue, reorderQueue as tpReorderQueue, appendQueue as tpAppendQueue } from '../services/trackPlayer';
+import { useProgressStore } from './progressStore';
 
 // MMKV storage adapter compatible with Zustand persist
 const mmkvStorage = {
@@ -63,14 +64,18 @@ export const usePlayerStore = create<PlayerState>()(
       playMode: 'sequential',
       originalQueue: [],
       playContext: null,
-      setQueue: (queue, bvid, context) =>
-        set(state => ({
+      setQueue: (queue, bvid, context) => {
+        // 【P0防闪烁优化】setQueue 触发新队列时同步重置播放进度，
+        // 避免 PlayerScreen 在新数据就绪前显示上一首歌的 position/duration
+        useProgressStore.getState().resetProgress();
+        return set(state => ({
           queue,
           currentBvid: bvid ?? queue[0]?.bvid ?? null,
           originalQueue: queue,
           currentCid: null,
           playContext: context !== undefined ? context : state.playContext
-        })),
+        }));
+      },
       setCurrentBvid: (bvid) => set({ currentBvid: bvid }),
       setCurrentCid: (cid) => set({ currentCid: cid }),
       setResolving: (resolving) => set({ isResolving: resolving }),
