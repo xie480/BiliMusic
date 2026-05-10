@@ -1,13 +1,12 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform, Animated, InteractionManager } from 'react-native';
+import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform } from 'react-native';
 import FastImage from 'react-native-fast-image';
 import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
 import { resumePlayback, playSpecificPart } from '../services/trackPlayer';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from '../components/IconButton';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useUIStore } from '../store/uiStore';
 // import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
 import { ProgressBar } from '../components/ProgressBar';
@@ -35,13 +34,21 @@ const STATIC_STYLES = StyleSheet.create({
     marginRight: 16,
     overflow: 'hidden',
   },
-  body: { flex: 1 },
+  coverContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end', // 将封面推向底部，严格控制与下方区域的间距
+    width: '100%',
+    paddingTop: 16,
+    minHeight: 0,
+  },
   cover: {
-    width: 320,
-    height: 320,
+    width: '85%',
+    maxWidth: 360, // 适当放宽最大尺寸，允许在大屏上更大以填充空间
+    maxHeight: 360,
+    aspectRatio: 1,
+    flexShrink: 1,
     borderRadius: 16,
-    marginTop: 70,
-    marginBottom: -10,
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 24,
@@ -260,7 +267,6 @@ export const PlayerScreen = () => {
   const dynamicStyles = useMemo(() => StyleSheet.create({
     header: {
       ...STATIC_STYLES.header,
-      marginTop: themeColors.headerMarginTop,
     },
     headerTitle: { fontSize: t.fontSize.xxl, fontWeight: 'bold', color: themeColors.textPrimary },
     headerArtist: { fontSize: t.fontSize.sm, color: themeColors.textSecondary, marginTop: 2 },
@@ -278,7 +284,6 @@ export const PlayerScreen = () => {
     },
     bottomBar: {
       ...STATIC_STYLES.bottomBar,
-      paddingBottom: themeColors.bottomPadding,
     },
     statusBar: {
       ...STATIC_STYLES.statusBar,
@@ -358,17 +363,29 @@ export const PlayerScreen = () => {
         </>
       ) : null}
       <View style={STATIC_STYLES.contentLayer}>
-        <View style={dynamicStyles.header}>
-          <View style={STATIC_STYLES.headerTextContainer}>
-            <MarqueeText text={track.title || '未知歌曲'} style={dynamicStyles.headerTitle} />
-            <Text style={dynamicStyles.headerArtist} numberOfLines={1}>
-              {track.artist || '未知歌手'}
-            </Text>
+        {/* ======== 上方区域：Header + 封面图 ======== */}
+        <View style={{ marginTop: themeColors.headerMarginTop, flex: 1 }}>
+          <View style={dynamicStyles.header}>
+            <View style={STATIC_STYLES.headerTextContainer}>
+              <MarqueeText text={track.title || '未知歌曲'} style={dynamicStyles.headerTitle} />
+              <Text style={dynamicStyles.headerArtist} numberOfLines={1}>
+                {track.artist || '未知歌手'}
+              </Text>
+            </View>
+            <IconButton name="chevron-down" size={28} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={() => nav.goBack()} />
           </View>
-          <IconButton name="chevron-down" size={28} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={() => nav.goBack()} />
+          
+          {/* 封面图容器：占据上方区域剩余空间，封面靠下对齐 */}
+          <View style={STATIC_STYLES.coverContainer}>
+            <FastImage source={{ uri: track.artwork as string }} style={dynamicStyles.cover} />
+          </View>
         </View>
-        <View style={[STATIC_STYLES.body, { alignItems: 'center', paddingHorizontal: t.spacing.xl }]}>
-          <FastImage source={{ uri: track.artwork as string }} style={dynamicStyles.cover} />
+
+        {/* ======== 两个区域之间的最大距离控制 ======== */}
+        <View style={{ height: '6%', maxHeight: 0, minHeight: 0 }} />
+
+        {/* ======== 下方区域：进度条 + 播放控制 + 底部工具栏 ======== */}
+        <View style={{ marginBottom: themeColors.bottomPadding, alignItems: 'center', paddingHorizontal: t.spacing.xl }}>
           <View style={dynamicStyles.progressBox}>
             <ProgressBar
               progress={progressDuration > 0 ? progressPosition / progressDuration : 0}
