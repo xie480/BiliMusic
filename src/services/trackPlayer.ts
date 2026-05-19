@@ -220,14 +220,24 @@ export async function setupPlayer() {
 
 /**
  * 根据 FavoriteVideo 数据构建占位符轨道。
- * 如果视频已有 parts 信息（来自数据库持久化），则注入第一P的 cid 到占位符 URL，
- * 使 lazyResolve 可直接发起 playurl 请求，跳过首次 videoInfo 请求，减少 1 RTT。
+ * 使用本地静音 WAV 文件作为占位符 URL，确保播放器在任何状态（包括后台）
+ * 都能立即播放本地文件，从而保持 MediaSession 活跃、前台服务不降级、
+ * 系统通知栏 UI 不消失。此举完全规避了 placeholder:// 协议 URL 在
+ * 后台环境下的加载耗时超时 / 系统绞杀问题。
+ *
+ * 本地静音文件加载特性：
+ * - 免网络 IO：从 APK 资源直接加载，零延迟
+ * - 自带 WakeLock：ExoPlayer 播放本地文件时会自动持有 Partial WakeLock
+ * - 零后台限制：不触发 Android 12+ 的 FGS Background Start Restriction
+ * - 无缝过渡：真实 URL 解析完成后通过 lazyResolve 替换，播放不中断
  */
 function buildPlaceholderTrack(v: FavoriteVideo) {
   const firstCid = v.parts && v.parts.length > 0 ? v.parts[0].cid : undefined;
   return {
     id: v.bvid,
-    url: firstCid ? `placeholder://${v.bvid}-${firstCid}` : `placeholder://${v.bvid}`,
+    url: require('../assets/silent.wav'),
+    isPlaceholder: true,
+    bvid: v.bvid,
     title: v.title,
     artist: v.upper?.name || '未知作者',
     artwork: v.cover,
@@ -582,12 +592,21 @@ async function lazyResolve(
     if (!guardVersion(version, `lazyResolve:postGetQueue(idx=${index})`)) return;
 
     const t = queue[index];
-    if (!t || !String(t.url).startsWith('placeholder://')) return;
+    // 【静默占位符兼容】检查 isPlaceholder 标志或传统的 placeholder:// 协议 URL
+    const isPlaceholder = (t as any).isPlaceholder === true || String(t.url).startsWith('placeholder://');
+    if (!t || !isPlaceholder) return;
 
-    const rawId = String(t.url).replace('placeholder://', '');
-    const [extractedBvid, cidStr] = rawId.split('-');
-    bvid = extractedBvid;
-    const cid = cidStr ? parseInt(cidStr, 10) : undefined;
+    let cid: number | undefined;
+    if (String(t.url).startsWith('placeholder://')) {
+      const rawId = String(t.url).replace('placeholder://', '');
+      const [extractedBvid, cidStr] = rawId.split('-');
+      bvid = extractedBvid;
+      cid = cidStr ? parseInt(cidStr, 10) : undefined;
+    } else {
+      // 本地静音占位符：从 bvid 字段提取
+      bvid = (t as any).bvid || t.id;
+      cid = (t as any).cid;
+    }
 
     // 记录轨道开始加载时间
     performanceMonitor.start(bvid);
@@ -673,7 +692,7 @@ async function lazyResolve(
         if (useSettingsStore.getState().expandMultiPart) {
           const expandQueue = await TrackPlayer.getQueue();
           const currentIdx = expandQueue.findIndex(
-            tr => tr.id === bvid && String(tr.url).startsWith('placeholder://')
+            tr => tr.id === bvid && ((tr as any).isPlaceholder === true || String(tr.url).startsWith('placeholder://'))
           );
           if (currentIdx !== -1) {
             const remainingParts = parts.slice(1);
@@ -681,7 +700,9 @@ async function lazyResolve(
               const part = remainingParts[i];
               await TrackPlayer.add({
                 id: bvid,
-                url: `placeholder://${bvid}-${part.cid}`,
+                url: require('../assets/silent.wav'),
+                isPlaceholder: true,
+                bvid: bvid,
                 title: `${videoInfo.title} - ${part.title}`,
                 artist: videoInfo.author,
                 artwork: videoInfo.cover,
@@ -698,7 +719,7 @@ async function lazyResolve(
     const freshQueue = await TrackPlayer.getQueue();
     if (!guardVersion(version, `lazyResolve:postFreshQueue(idx=${index})`)) return;
 
-    const actualIndex = freshQueue.findIndex(tr => tr.id === bvid && String(tr.url).startsWith('placeholder://'));
+    const actualIndex = freshQueue.findIndex(tr => tr.id === bvid && ((tr as any).isPlaceholder === true || String(tr.url).startsWith('placeholder://')));
     if (actualIndex === -1) {
       return;
     }
@@ -711,6 +732,7 @@ async function lazyResolve(
       title = `${videoInfo.title} - ${videoInfo.parts[0].title}`;
     }
     const newTrack: any = { ...t, url, title, userAgent: config.userAgent, headers, cid: effectiveCid };
+    delete newTrack.isPlaceholder;
 
     // ======== 第三重：替换前最终版本校验 ========
     if (!guardVersion(version, `lazyResolve:preReplace(idx=${index})`)) return;
@@ -849,8 +871,8 @@ export async function resumePlayback(): Promise<void> {
     const activeTrack = await TrackPlayer.getActiveTrack();
     if (!activeTrack) return;
 
-    const isPlaceholder = typeof activeTrack.url === 'string' &&
-      activeTrack.url.startsWith('placeholder://');
+    const isPlaceholder = (activeTrack as any).isPlaceholder === true || (typeof activeTrack.url === 'string' &&
+      activeTrack.url.startsWith('placeholder://'));
 
     if (isPlaceholder) {
       // 【P0性能优化】乐观加载状态：占位符恢复播放时立即显示加载动画
@@ -978,7 +1000,8 @@ export async function PlaybackService() {
     }
 
     // ======== 路径 A：轨道已解析 → 仅同步状态 + 预取 ========
-    if (activeTrack.url && !String(activeTrack.url).startsWith('placeholder://')) {
+    const isPlaceholder = (activeTrack as any).isPlaceholder === true || (typeof activeTrack.url === 'string' && String(activeTrack.url).startsWith('placeholder://'));
+    if (activeTrack.url && !isPlaceholder) {
       const bvid = activeTrack.id as string;
       performanceMonitor.start(bvid);
       usePlayerStore.getState().setCurrentBvid(bvid);
@@ -1001,27 +1024,27 @@ export async function PlaybackService() {
     }
 
     // ======== 路径 B：轨道是占位符 → 是否需要解析？ ========
-    const bvid = activeTrack.id as string;
+    const bvid = (activeTrack as any).bvid || activeTrack.id as string;
     performanceMonitor.start(bvid);
     usePlayerStore.getState().setCurrentBvid(bvid);
 
     const trackCid = (activeTrack as any).cid;
     if (typeof trackCid === 'number') {
       usePlayerStore.getState().setCurrentCid(trackCid);
-    } else if (activeTrack.url && typeof activeTrack.url === 'string') {
+    } else if (activeTrack.url && typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')) {
       const urlStr = activeTrack.url;
-      if (urlStr.startsWith('placeholder://')) {
-        const rawId = urlStr.replace('placeholder://', '');
-        const parts = rawId.split('-');
-        if (parts.length >= 2) {
-          const cid = parseInt(parts[1], 10);
-          if (!isNaN(cid)) {
-            usePlayerStore.getState().setCurrentCid(cid);
-          }
+      const rawId = urlStr.replace('placeholder://', '');
+      const parts = rawId.split('-');
+      if (parts.length >= 2) {
+        const cid = parseInt(parts[1], 10);
+        if (!isNaN(cid)) {
+          usePlayerStore.getState().setCurrentCid(cid);
         }
       } else {
         usePlayerStore.getState().setCurrentCid(null);
       }
+    } else {
+      usePlayerStore.getState().setCurrentCid(null);
     }
 
     // 【冷启动优化】目标轨道跳过 lazyResolve，URL 解析完全延迟到用户点击播放
@@ -1066,8 +1089,7 @@ export async function PlaybackService() {
 
       if (
         activeTrack &&
-        typeof activeTrack.url === 'string' &&
-        activeTrack.url.startsWith('placeholder://')
+        ((activeTrack as any).isPlaceholder === true || (typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://')))
       ) {
         LoggerService.info(
           'TrackPlayer',
@@ -1148,14 +1170,13 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
   usePlayerStore.getState().setResolving(true);
   const expandMultiPart = useSettingsStore.getState().expandMultiPart;
   const currentQueue = await TrackPlayer.getQueue();
-  const placeholderUrl = `placeholder://${bvid}-${cid}`;
   const quality = useSettingsStore.getState().quality;
 
   if (expandMultiPart) {
     // 展开模式：查找队列中已存在的分P轨道（按 id 和 cid 匹配）
     // 兼容未解析的 placeholder 和已解析的 file:// 轨道
     const existingIndex = currentQueue.findIndex(
-      t => t.id === bvid && ((t as any).cid === cid || t.url === placeholderUrl)
+      t => t.id === bvid && ((t as any).cid === cid)
     );
 
     if (existingIndex !== -1) {
@@ -1174,7 +1195,9 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
 
     await TrackPlayer.add({
       id: bvid,
-      url: placeholderUrl,
+      url: require('../assets/silent.wav'),
+      isPlaceholder: true,
+      bvid: bvid,
       title: `${info.title} - ${partTitle}`,
       artist: info.author,
       artwork: info.cover,
@@ -1194,7 +1217,9 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
       const info = await audioService.getInfo(bvid, quality, cid);
       await TrackPlayer.add({
         id: bvid,
-        url: placeholderUrl,
+        url: require('../assets/silent.wav'),
+        isPlaceholder: true,
+        bvid: bvid,
         title: `${info.title} - ${partTitle}`,
         artist: info.author,
         artwork: info.cover,
@@ -1208,7 +1233,9 @@ export async function playSpecificPart(bvid: string, cid: number, partTitle: str
       const info = await audioService.getInfo(bvid, quality, cid);
       await TrackPlayer.add({
         id: bvid,
-        url: placeholderUrl,
+        url: require('../assets/silent.wav'),
+        isPlaceholder: true,
+        bvid: bvid,
         title: `${info.title} - ${partTitle}`,
         artist: info.author,
         artwork: info.cover,
