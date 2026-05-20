@@ -2,6 +2,11 @@ import TrackPlayer, {
   AppKilledPlaybackBehavior, Capability, Event,
   IOSCategory, IOSCategoryMode, IOSCategoryOptions
 } from 'react-native-track-player';
+import {
+  resetPreloadState,
+  markAudioAsCached,
+  triggerPreload,
+} from './preloadEngine';
 import { AppState } from 'react-native';
 import LoggerService from './LoggerService';
 import { audioService } from './audioService';
@@ -157,6 +162,7 @@ export async function setupPlayer() {
       ++_queueVersion;
       _queueStable = false;
       _pendingAutoPlayAfterResolve = false;
+      resetPreloadState();
 
       try {
         const currentBvid = store.currentBvid;
@@ -272,6 +278,8 @@ export async function loadQueue(
   // 用户主动操作加载新队列，清空冷启动状态
   _coldStartBvid = null;
   _pendingSeek = null;
+  // 重置预加载引擎状态，清空所有去重记录和待处理任务
+  resetPreloadState();
 
   try {
     await TrackPlayer.reset();
@@ -406,6 +414,8 @@ export async function removeFromQueue(bvid: string): Promise<void> {
  */
 export async function reorderQueue(videos: FavoriteVideo[], startBvid?: string): Promise<void> {
   if (videos.length === 0) return;
+  // 队列重排，预加载的去重状态不再有效，需重置
+  resetPreloadState();
   // 1. 保存原生队列中已解析的轨道数据（包含文件 URL、cid 等）
   const nativeQueue = await TrackPlayer.getQueue();
   const nativeTrackMap = new Map<string, any>();
@@ -493,6 +503,8 @@ export async function appendQueue(videos: FavoriteVideo[], startBvid?: string): 
   const combined = [...cur.queue, ...videos];
   cur.setQueue(combined, startBvid ?? cur.currentBvid ?? undefined);
 
+  // 新轨道追加后，重置预加载引擎去重状态以覆盖新追加的轨道
+  resetPreloadState();
   // 【性能优化】新轨道加入后，触发滑动窗口纯数据预取，覆盖新追加的轨道
   const activeIndex = await TrackPlayer.getActiveTrackIndex();
   if (typeof activeIndex === 'number' && activeIndex >= 0) {
@@ -805,6 +817,17 @@ async function lazyResolve(
         await TrackPlayer.play().catch(() => {});
       }
     }
+
+    // ======== 标记当前轨道到预加载去重集合 ========
+    // lazyResolve 成功完成真实 URL 注入后，将当前 BVID/CID 标记到
+    // preloadEngine 的全局 _preloadingOrCached 集合中，确保后续
+    // triggerPreload 不会对该资源发起重复的预加载请求。
+    // 例如：播放第 2 首歌时，绝不会再次去预加载第 1 首歌播放期间
+    // 已经预加载过的第 3 首歌。
+    // 使用 effectiveCid（经过多P展开解析后的最终CID），而非原始 cid
+    if (bvid) {
+      markAudioAsCached(bvid, effectiveCid);
+    }
   } catch (error) {
     LoggerService.error('TrackPlayer', 'lazyResolve', `解析音频失败 (BVID: ${bvid}):`, error);
 
@@ -950,6 +973,27 @@ export async function PlaybackService() {
     if (playerState === State.Playing) {
       performanceMonitor.firstFrame(bvid);
       performanceMonitor.stallEnd(bvid);
+
+      // ======== 【智能预加载触发点】当前音轨成功进入播放状态后 ========
+      // 判断条件：
+      // 1. 当前轨道不是占位符（已加载真实 URL，说明成功进入播放状态）
+      // 2. 队列版本有效
+      // 满足以上条件时，立即异步触发后续 5 首歌曲的完整预加载。
+      //
+      // 为什么放在 PlaybackState 而非 PlaybackActiveTrackChanged？
+      // - PlaybackActiveTrackChanged 在轨道切换时触发，但此时新轨道
+      //   可能还是占位符（未加载），不能视为"成功播放"
+      // - PlaybackState 的 State.Playing 表示音频数据已开始解码输出，
+      //   是"当前音轨成功加载并顺利进入播放状态"的精确信号
+      const isPlaceholder = (activeTrack as any).isPlaceholder === true ||
+        (typeof activeTrack.url === 'string' && activeTrack.url.startsWith('placeholder://'));
+      if (!isPlaceholder) {
+        const activeIndex = await TrackPlayer.getActiveTrackIndex();
+        if (typeof activeIndex === 'number' && activeIndex >= 0) {
+          // 异步触发预加载，不阻塞播放状态处理
+          triggerPreload(activeIndex).catch(() => {});
+        }
+      }
     } else if (playerState === State.Buffering) {
       performanceMonitor.stallStart(bvid);
     }
