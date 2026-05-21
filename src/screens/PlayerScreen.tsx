@@ -1,27 +1,48 @@
-import React, { useState, useRef, useMemo } from 'react';
-import { useShallow } from 'zustand/react/shallow';
-import { View, Text, StyleSheet, StatusBar, ScrollView, TouchableOpacity, Image, ActivityIndicator, Modal, TouchableWithoutFeedback, Platform } from 'react-native';
+import React, {useState, useRef, useMemo} from 'react';
+import {useShallow} from 'zustand/react/shallow';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Modal,
+  TouchableWithoutFeedback,
+  Platform,
+} from 'react-native';
 import FastImage from 'react-native-fast-image';
-import TrackPlayer, { useActiveTrack, usePlaybackState, State } from 'react-native-track-player';
-import { resumePlayback, playSpecificPart } from '../services/trackPlayer';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { IconButton } from '../components/IconButton';
-import { useUIStore } from '../store/uiStore';
+import TrackPlayer, {
+  useActiveTrack,
+  usePlaybackState,
+  State,
+} from 'react-native-track-player';
+import {
+  resumePlayback,
+  playSpecificPart,
+  skipToNext,
+  skipToPrevious,
+} from '../services/trackPlayer';
+import {useNavigation, useFocusEffect} from '@react-navigation/native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {IconButton} from '../components/IconButton';
+import {useUIStore} from '../store/uiStore';
 // import { PlaylistPanel } from '../components/PlaylistPanel'; // removed to avoid duplicate modal rendering
-import { ProgressBar } from '../components/ProgressBar';
-import { MarqueeText } from '../components/MarqueeText';
-import { formatDuration } from '../utils/format';
-import { useTheme } from '../theme';
-import { useSettingsStore } from '../store/settingsStore';
-import { netStatus } from '../services/netStatus';
-import { usePlayerStore } from '../store/playerStore';
-import { useSyncStore } from '../store/syncStore';
-import { useProgressStore } from '../store/progressStore';
+import {ProgressBar} from '../components/ProgressBar';
+import {MarqueeText} from '../components/MarqueeText';
+import {formatDuration} from '../utils/format';
+import {useTheme} from '../theme';
+import {useSettingsStore} from '../store/settingsStore';
+import {netStatus} from '../services/netStatus';
+import {usePlayerStore} from '../store/playerStore';
+import {useSyncStore} from '../store/syncStore';
+import {useProgressStore} from '../store/progressStore';
 
 // ======== 【性能优化】静态样式移至组件外部，避免每次渲染重复创建 ========
 const STATIC_STYLES = StyleSheet.create({
-  container: { flex: 1 },
+  container: {flex: 1},
   header: {
     height: 64,
     flexDirection: 'row',
@@ -52,11 +73,15 @@ const STATIC_STYLES = StyleSheet.create({
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 24,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: {width: 0, height: 8},
     elevation: 12,
   },
-  progressBox: { width: '100%', marginTop: 90 },
-  timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -2 },
+  progressBox: {width: '100%', marginTop: 90},
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: -2,
+  },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -64,7 +89,13 @@ const STATIC_STYLES = StyleSheet.create({
     width: '100%',
     marginTop: 32,
   },
-  playBtn: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
+  playBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   bottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -73,10 +104,10 @@ const STATIC_STYLES = StyleSheet.create({
     marginTop: 32,
     paddingHorizontal: 16,
   },
-  bottomBarLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 16 },
-  statusBar: { flexDirection: 'row', justifyContent: 'center', gap: 16 },
-  statusItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  partsContainer: { alignSelf: 'stretch', marginTop: 8 },
+  bottomBarLeft: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 16},
+  statusBar: {flexDirection: 'row', justifyContent: 'center', gap: 16},
+  statusItem: {flexDirection: 'row', alignItems: 'center', gap: 4},
+  partsContainer: {alignSelf: 'stretch', marginTop: 8},
   partsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -85,17 +116,24 @@ const STATIC_STYLES = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
   },
-  partsList: { maxHeight: 250, marginTop: 4, borderRadius: 8 },
+  partsList: {maxHeight: 250, marginTop: 4, borderRadius: 8},
   partItem: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  partItemContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  partItemText: { fontSize: 14, flex: 1, marginRight: 8 },
-  playingIndicator: { fontSize: 12 },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
-  modalBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  partItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  partItemText: {fontSize: 14, flex: 1, marginRight: 8},
+  playingIndicator: {fontSize: 12},
+  modalOverlay: {flex: 1, justifyContent: 'flex-end'},
+  modalBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
   modalContent: {
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -108,16 +146,16 @@ const STATIC_STYLES = StyleSheet.create({
     padding: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  modalTitle: { fontSize: 18, fontWeight: 'bold' },
-  modalScroll: { paddingHorizontal: 12 },
+  modalTitle: {fontSize: 18, fontWeight: 'bold'},
+  modalScroll: {paddingHorizontal: 12},
   modalPartItem: {
     paddingHorizontal: 12,
     paddingVertical: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  blurBackground: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
-  blurOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
-  contentLayer: { flex: 1, zIndex: 2 },
+  blurBackground: {...StyleSheet.absoluteFillObject, zIndex: 0},
+  blurOverlay: {...StyleSheet.absoluteFillObject, zIndex: 1},
+  contentLayer: {flex: 1, zIndex: 2},
 });
 
 export const PlayerScreen = () => {
@@ -137,19 +175,19 @@ export const PlayerScreen = () => {
     playMode,
     togglePlayMode,
   } = usePlayerStore(
-    useShallow((s) => ({
+    useShallow(s => ({
       storeQueue: s.queue,
       storeCurrentBvid: s.currentBvid,
       currentCid: s.currentCid,
       isResolving: s.isResolving,
       playMode: s.playMode,
       togglePlayMode: s.togglePlayMode,
-    }))
+    })),
   );
 
   // ======== 用 useMemo 缓存 fallbackTrack，避免每次渲染重新创建对象 ========
-  const { fallbackTrack, fallbackDuration } = useMemo(() => {
-    const currVideo = storeQueue.find((v) => v.bvid === storeCurrentBvid);
+  const {fallbackTrack, fallbackDuration} = useMemo(() => {
+    const currVideo = storeQueue.find(v => v.bvid === storeCurrentBvid);
     return {
       fallbackTrack: currVideo
         ? {
@@ -165,12 +203,15 @@ export const PlayerScreen = () => {
   }, [storeQueue, storeCurrentBvid]);
 
   // ======== 【防闪烁优化】合并 progressStore 订阅 ========
-  const { progressPosition, progressDuration } = useProgressStore(
-    useShallow((s) => ({ progressPosition: s.position, progressDuration: s.duration }))
+  const {progressPosition, progressDuration} = useProgressStore(
+    useShallow(s => ({
+      progressPosition: s.position,
+      progressDuration: s.duration,
+    })),
   );
 
-  const quality = useSettingsStore((s) => s.quality);
-  const syncStatus = useSyncStore((s) => s.syncStatus);
+  const quality = useSettingsStore(s => s.quality);
+  const syncStatus = useSyncStore(s => s.syncStatus);
   const activeTrack = useActiveTrack();
   const playback = usePlaybackState();
   const [isPartsModalVisible, setIsPartsModalVisible] = useState(false);
@@ -189,13 +230,15 @@ export const PlayerScreen = () => {
    */
   const track =
     isResolving && activeTrack?.id !== storeCurrentBvid
-      ? ((fallbackTrack as any) || null)
-      : (activeTrack || (fallbackTrack as any) || null);
+      ? (fallbackTrack as any) || null
+      : activeTrack || (fallbackTrack as any) || null;
 
   // ======== 从 track 计算 currentVideo（替代旧的独立 selector） ========
   const trackId = track?.id;
   const currentVideo = usePlayerStore(
-    useShallow((s) => (trackId ? s.queue.find((v) => v.bvid === trackId) : undefined))
+    useShallow(s =>
+      trackId ? s.queue.find(v => v.bvid === trackId) : undefined,
+    ),
   );
 
   const duration = progressDuration || fallbackDuration;
@@ -203,12 +246,17 @@ export const PlayerScreen = () => {
   const isPlaying = playback.state === State.Playing;
   // ======== 加载状态判定 ========
   const trackUrl = track?.url;
-  const isPlaceholder = typeof trackUrl === 'string' && trackUrl.startsWith('placeholder://');
-  const isBuffering = !isPlaceholder && (playback.state === State.Buffering || playback.state === State.Loading);
+  const isPlaceholder =
+    typeof trackUrl === 'string' && trackUrl.startsWith('placeholder://');
+  const isBuffering =
+    !isPlaceholder &&
+    (playback.state === State.Buffering || playback.state === State.Loading);
   const isGlass = !!t.glass;
 
-  const statusBarHeight = Platform.OS === 'android' ? Math.max(insets.top, StatusBar.currentHeight ?? 0) : insets.top;
-
+  const statusBarHeight =
+    Platform.OS === 'android'
+      ? Math.max(insets.top, StatusBar.currentHeight ?? 0)
+      : insets.top;
 
   // ======== 【防闪烁修复】useFocusEffect：页面聚焦时重置 progressStore ========
   const hasResetProgressOnFocus = useRef(false);
@@ -223,7 +271,7 @@ export const PlayerScreen = () => {
       return () => {
         hasResetProgressOnFocus.current = false;
       };
-    }, [isResolving])
+    }, [isResolving]),
   );
 
   // ======== 【性能优化】使用 useMemo 缓存主题派生值，避免每次渲染重新计算 ========
@@ -253,9 +301,10 @@ export const PlayerScreen = () => {
       surfaceBg: g.colors.player?.bgOverlay || g.colors.glass.bg,
       dividerColor: t.colors.divider,
       blurRadius: g.material.playerBlurRadius || g.material.blurRadius,
-      playBg: typeof g.colors.button.playBg === 'string'
-        ? g.colors.button.playBg
-        : g.colors.button.playBg[0],
+      playBg:
+        typeof g.colors.button.playBg === 'string'
+          ? g.colors.button.playBg
+          : g.colors.button.playBg[0],
       playTextColor: g.colors.button.playText,
       headerMarginTop: t.spacing.md + statusBarHeight,
       bottomPadding: insets.bottom + 16,
@@ -264,73 +313,109 @@ export const PlayerScreen = () => {
   }, [t, statusBarHeight, insets.bottom]);
 
   // ======== 【性能优化】使用 useMemo 缓存动态样式 ========
-  const dynamicStyles = useMemo(() => StyleSheet.create({
-    header: {
-      ...STATIC_STYLES.header,
-    },
-    headerTitle: { fontSize: t.fontSize.xxl, fontWeight: 'bold', color: themeColors.textPrimary },
-    headerArtist: { fontSize: t.fontSize.sm, color: themeColors.textSecondary, marginTop: 2 },
-    cover: {
-      ...STATIC_STYLES.cover,
-    },
-    progressBox: {
-      ...STATIC_STYLES.progressBox,
-      marginTop: t.spacing.xxl + 50,
-    },
-    time: { fontSize: t.fontSize.xs, color: themeColors.textTertiary },
-    playBtn: {
-      ...STATIC_STYLES.playBtn,
-      backgroundColor: themeColors.playBg,
-    },
-    bottomBar: {
-      ...STATIC_STYLES.bottomBar,
-    },
-    statusBar: {
-      ...STATIC_STYLES.statusBar,
-      paddingBottom: themeColors.modalBottomPadding + 16,
-    },
-    statusText: { fontSize: t.fontSize.xs, color: themeColors.textTertiary },
-    partsHeader: {
-      ...STATIC_STYLES.partsHeader,
-      backgroundColor: themeColors.surfaceBg,
-    },
-    partsHeaderText: { fontSize: t.fontSize.base, color: themeColors.textPrimary, fontWeight: '500' },
-    partsList: {
-      ...STATIC_STYLES.partsList,
-      backgroundColor: themeColors.surfaceBg,
-    },
-    partItem: {
-      ...STATIC_STYLES.partItem,
-      borderBottomColor: themeColors.dividerColor,
-    },
-    partItemActive: { backgroundColor: themeColors.accentPrimary + '20' },
-    partItemText: { ...STATIC_STYLES.partItemText, color: themeColors.textPrimary },
-    partItemTextActive: { color: themeColors.accentPrimary, fontWeight: '600' },
-    modalContent: {
-      ...STATIC_STYLES.modalContent,
-      backgroundColor: themeColors.surfaceBg,
-      paddingBottom: themeColors.modalBottomPadding,
-    },
-    modalHeader: {
-      ...STATIC_STYLES.modalHeader,
-      borderBottomColor: themeColors.dividerColor,
-    },
-    modalTitle: { ...STATIC_STYLES.modalTitle, color: themeColors.textPrimary },
-    modalPartItem: {
-      ...STATIC_STYLES.modalPartItem,
-      borderBottomColor: themeColors.dividerColor,
-    },
-    modalPartItemActive: { backgroundColor: themeColors.accentPrimary + '20', borderRadius: 8 },
-    loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    blurOverlay: {
-      ...STATIC_STYLES.blurOverlay,
-      backgroundColor: isGlass ? themeColors.surfaceBg : 'transparent',
-    },
-  }), [t, themeColors, isGlass]);
+  const dynamicStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        header: {
+          ...STATIC_STYLES.header,
+        },
+        headerTitle: {
+          fontSize: t.fontSize.xxl,
+          fontWeight: 'bold',
+          color: themeColors.textPrimary,
+        },
+        headerArtist: {
+          fontSize: t.fontSize.sm,
+          color: themeColors.textSecondary,
+          marginTop: 2,
+        },
+        cover: {
+          ...STATIC_STYLES.cover,
+        },
+        progressBox: {
+          ...STATIC_STYLES.progressBox,
+          marginTop: t.spacing.xxl + 50,
+        },
+        time: {fontSize: t.fontSize.xs, color: themeColors.textTertiary},
+        playBtn: {
+          ...STATIC_STYLES.playBtn,
+          backgroundColor: themeColors.playBg,
+        },
+        bottomBar: {
+          ...STATIC_STYLES.bottomBar,
+        },
+        statusBar: {
+          ...STATIC_STYLES.statusBar,
+          paddingBottom: themeColors.modalBottomPadding + 16,
+        },
+        statusText: {fontSize: t.fontSize.xs, color: themeColors.textTertiary},
+        partsHeader: {
+          ...STATIC_STYLES.partsHeader,
+          backgroundColor: themeColors.surfaceBg,
+        },
+        partsHeaderText: {
+          fontSize: t.fontSize.base,
+          color: themeColors.textPrimary,
+          fontWeight: '500',
+        },
+        partsList: {
+          ...STATIC_STYLES.partsList,
+          backgroundColor: themeColors.surfaceBg,
+        },
+        partItem: {
+          ...STATIC_STYLES.partItem,
+          borderBottomColor: themeColors.dividerColor,
+        },
+        partItemActive: {backgroundColor: themeColors.accentPrimary + '20'},
+        partItemText: {
+          ...STATIC_STYLES.partItemText,
+          color: themeColors.textPrimary,
+        },
+        partItemTextActive: {
+          color: themeColors.accentPrimary,
+          fontWeight: '600',
+        },
+        modalContent: {
+          ...STATIC_STYLES.modalContent,
+          backgroundColor: themeColors.surfaceBg,
+          paddingBottom: themeColors.modalBottomPadding,
+        },
+        modalHeader: {
+          ...STATIC_STYLES.modalHeader,
+          borderBottomColor: themeColors.dividerColor,
+        },
+        modalTitle: {
+          ...STATIC_STYLES.modalTitle,
+          color: themeColors.textPrimary,
+        },
+        modalPartItem: {
+          ...STATIC_STYLES.modalPartItem,
+          borderBottomColor: themeColors.dividerColor,
+        },
+        modalPartItemActive: {
+          backgroundColor: themeColors.accentPrimary + '20',
+          borderRadius: 8,
+        },
+        loadingContainer: {
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        blurOverlay: {
+          ...STATIC_STYLES.blurOverlay,
+          backgroundColor: isGlass ? themeColors.surfaceBg : 'transparent',
+        },
+      }),
+    [t, themeColors, isGlass],
+  );
 
   if (!track) {
     return (
-      <View style={[{ backgroundColor: t.colors.background }, dynamicStyles.loadingContainer]}>
+      <View
+        style={[
+          {backgroundColor: t.colors.background},
+          dynamicStyles.loadingContainer,
+        ]}>
         <ActivityIndicator size="large" color={t.colors.primary} />
       </View>
     );
@@ -354,63 +439,122 @@ export const PlayerScreen = () => {
   };
 
   return (
-    <View style={[STATIC_STYLES.container, { backgroundColor: t.colors.background }]}>
-      <StatusBar barStyle={t.isDark ? 'light-content' : 'dark-content'} translucent backgroundColor="transparent" />
+    <View
+      style={[STATIC_STYLES.container, {backgroundColor: t.colors.background}]}>
+      <StatusBar
+        barStyle={t.isDark ? 'light-content' : 'dark-content'}
+        translucent
+        backgroundColor="transparent"
+      />
       {isGlass && track.artwork ? (
         <>
-          <Image source={{ uri: track.artwork as string }} style={STATIC_STYLES.blurBackground} blurRadius={themeColors.blurRadius} resizeMode="cover" />
+          <Image
+            source={{uri: track.artwork as string}}
+            style={STATIC_STYLES.blurBackground}
+            blurRadius={themeColors.blurRadius}
+            resizeMode="cover"
+          />
           <View style={dynamicStyles.blurOverlay} pointerEvents="none" />
         </>
       ) : null}
       <View style={STATIC_STYLES.contentLayer}>
         {/* ======== 上方区域：Header + 封面图 ======== */}
-        <View style={{ marginTop: themeColors.headerMarginTop, flex: 1 }}>
+        <View style={{marginTop: themeColors.headerMarginTop, flex: 1}}>
           <View style={dynamicStyles.header}>
             <View style={STATIC_STYLES.headerTextContainer}>
-              <MarqueeText text={track.title || '未知歌曲'} style={dynamicStyles.headerTitle} />
+              <MarqueeText
+                text={track.title || '未知歌曲'}
+                style={dynamicStyles.headerTitle}
+              />
               <Text style={dynamicStyles.headerArtist} numberOfLines={1}>
                 {track.artist || '未知歌手'}
               </Text>
             </View>
-            <IconButton name="chevron-down" size={28} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={() => nav.goBack()} />
+            <IconButton
+              name="chevron-down"
+              size={28}
+              color={isGlass ? themeColors.textPrimary : t.colors.text}
+              onPress={() => nav.goBack()}
+            />
           </View>
-          
+
           {/* 封面图容器：占据上方区域剩余空间，封面靠下对齐 */}
           <View style={STATIC_STYLES.coverContainer}>
-            <FastImage source={{ uri: track.artwork as string }} style={dynamicStyles.cover} />
+            <FastImage
+              source={{uri: track.artwork as string}}
+              style={dynamicStyles.cover}
+            />
           </View>
         </View>
 
         {/* ======== 两个区域之间的最大距离控制 ======== */}
-        <View style={{ height: '6%', maxHeight: 0, minHeight: 0 }} />
+        <View style={{height: '6%', maxHeight: 0, minHeight: 0}} />
 
         {/* ======== 下方区域：进度条 + 播放控制 + 底部工具栏 ======== */}
-        <View style={{ marginBottom: themeColors.bottomPadding, alignItems: 'center', paddingHorizontal: t.spacing.xl }}>
+        <View
+          style={{
+            marginBottom: themeColors.bottomPadding,
+            alignItems: 'center',
+            paddingHorizontal: t.spacing.xl,
+          }}>
           <View style={dynamicStyles.progressBox}>
             <ProgressBar
-              progress={progressDuration > 0 ? progressPosition / progressDuration : 0}
+              progress={
+                progressDuration > 0 ? progressPosition / progressDuration : 0
+              }
               onSeekStart={onSeekStart}
               onSeekUpdate={onSeekUpdate}
               onSeekEnd={onSeekEnd}
             />
             <View style={STATIC_STYLES.timeRow}>
-              <Text style={dynamicStyles.time}>{formatDuration(dragPosition !== null ? dragPosition : progressPosition)}</Text>
-              <Text style={dynamicStyles.time}>{formatDuration(progressDuration)}</Text>
+              <Text style={dynamicStyles.time}>
+                {formatDuration(
+                  dragPosition !== null ? dragPosition : progressPosition,
+                )}
+              </Text>
+              <Text style={dynamicStyles.time}>
+                {formatDuration(progressDuration)}
+              </Text>
             </View>
           </View>
           <View style={STATIC_STYLES.controls}>
-            <IconButton name="skip-previous" size={36} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={async () => { await TrackPlayer.skipToPrevious(); await TrackPlayer.play(); }} />
+            <IconButton
+              name="skip-previous"
+              size={36}
+              color={isGlass ? themeColors.textPrimary : t.colors.text}
+              onPress={skipToPrevious}
+            />
             <View style={dynamicStyles.playBtn}>
-              {(isBuffering || isResolving) ? (
-                <ActivityIndicator size="large" color={themeColors.playTextColor} />
+              {isBuffering || isResolving ? (
+                <ActivityIndicator
+                  size="large"
+                  color={themeColors.playTextColor}
+                />
               ) : (
-                <IconButton name={isPlaying ? 'pause' : 'play'} size={32} color={themeColors.playTextColor} onPress={() => (isPlaying ? TrackPlayer.pause() : resumePlayback())} />
+                <IconButton
+                  name={isPlaying ? 'pause' : 'play'}
+                  size={32}
+                  color={themeColors.playTextColor}
+                  onPress={() =>
+                    isPlaying ? TrackPlayer.pause() : resumePlayback()
+                  }
+                />
               )}
             </View>
-            <IconButton name="skip-next" size={36} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={async () => { await TrackPlayer.skipToNext(); await TrackPlayer.play(); }} />
+            <IconButton
+              name="skip-next"
+              size={36}
+              color={isGlass ? themeColors.textPrimary : t.colors.text}
+              onPress={skipToNext}
+            />
           </View>
           <View style={dynamicStyles.bottomBar}>
-            <IconButton name="playlist-music" size={24} color={isGlass ? themeColors.textPrimary : t.colors.text} onPress={() => useUIStore.getState().setPlaylistVisible(true)} />
+            <IconButton
+              name="playlist-music"
+              size={24}
+              color={isGlass ? themeColors.textPrimary : t.colors.text}
+              onPress={() => useUIStore.getState().setPlaylistVisible(true)}
+            />
             <IconButton
               name="tune"
               size={24}
@@ -441,35 +585,63 @@ export const PlayerScreen = () => {
           visible={isPartsModalVisible}
           transparent={true}
           animationType="slide"
-          onRequestClose={() => setIsPartsModalVisible(false)}
-        >
+          onRequestClose={() => setIsPartsModalVisible(false)}>
           <View style={STATIC_STYLES.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => setIsPartsModalVisible(false)}>
+            <TouchableWithoutFeedback
+              onPress={() => setIsPartsModalVisible(false)}>
               <View style={STATIC_STYLES.modalBackground} />
             </TouchableWithoutFeedback>
             <View style={dynamicStyles.modalContent}>
               <View style={dynamicStyles.modalHeader}>
-                <Text style={dynamicStyles.modalTitle}>选集 ({currentVideo.parts!.length})</Text>
-                <IconButton name="close" size={24} color={themeColors.textPrimary} onPress={() => setIsPartsModalVisible(false)} />
+                <Text style={dynamicStyles.modalTitle}>
+                  选集 ({currentVideo.parts!.length})
+                </Text>
+                <IconButton
+                  name="close"
+                  size={24}
+                  color={themeColors.textPrimary}
+                  onPress={() => setIsPartsModalVisible(false)}
+                />
               </View>
-              <ScrollView style={STATIC_STYLES.modalScroll} showsVerticalScrollIndicator={false}>
+              <ScrollView
+                style={STATIC_STYLES.modalScroll}
+                showsVerticalScrollIndicator={false}>
                 {currentVideo.parts!.map((part: any) => {
                   const isActive = part.cid === currentCid;
                   return (
                     <TouchableOpacity
                       key={part.cid}
-                      style={[dynamicStyles.modalPartItem, isActive && dynamicStyles.modalPartItemActive]}
+                      style={[
+                        dynamicStyles.modalPartItem,
+                        isActive && dynamicStyles.modalPartItemActive,
+                      ]}
                       onPress={() => {
-                        playSpecificPart(currentVideo.bvid, part.cid, part.title);
+                        playSpecificPart(
+                          currentVideo.bvid,
+                          part.cid,
+                          part.title,
+                        );
                         setIsPartsModalVisible(false);
                       }}
-                      activeOpacity={0.7}
-                    >
+                      activeOpacity={0.7}>
                       <View style={STATIC_STYLES.partItemContent}>
-                        <Text style={[dynamicStyles.partItemText, isActive && dynamicStyles.partItemTextActive]} numberOfLines={1}>
+                        <Text
+                          style={[
+                            dynamicStyles.partItemText,
+                            isActive && dynamicStyles.partItemTextActive,
+                          ]}
+                          numberOfLines={1}>
                           {part.title}
                         </Text>
-                        {isActive && <Text style={[STATIC_STYLES.playingIndicator, { color: themeColors.accentPrimary }]}>▶</Text>}
+                        {isActive && (
+                          <Text
+                            style={[
+                              STATIC_STYLES.playingIndicator,
+                              {color: themeColors.accentPrimary},
+                            ]}>
+                            ▶
+                          </Text>
+                        )}
                       </View>
                     </TouchableOpacity>
                   );
