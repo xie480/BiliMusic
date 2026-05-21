@@ -271,7 +271,6 @@ async function maintainQueueBuffer() {
     }
 
     const nativeIds = new Set(nativeQueue.map(t => t.id));
-    const tracksToAdd: Track[] = [];
     let addedCount = 0;
     let i = logicalIndex + 1;
 
@@ -279,11 +278,18 @@ async function maintainQueueBuffer() {
       const video = logicalQueue[i];
       if (!nativeIds.has(video.bvid)) {
         try {
+          // 独立解析每一首歌
           const tracks = await hydrateVideo(video);
           if (tracks.length > 0) {
-            tracksToAdd.push(...tracks);
+            // 解析成功后立即入队
+            await TrackPlayer.add(tracks);
             nativeIds.add(video.bvid);
             addedCount++;
+            LoggerService.info(
+              'TrackPlayer',
+              'maintainQueueBuffer',
+              `即时追加成功: ${video.bvid}`,
+            );
           } else {
             LoggerService.warn(
               'TrackPlayer',
@@ -303,15 +309,6 @@ async function maintainQueueBuffer() {
         addedCount++;
       }
       i++;
-    }
-
-    if (tracksToAdd.length > 0) {
-      await TrackPlayer.add(tracksToAdd);
-      LoggerService.info(
-        'TrackPlayer',
-        'maintainQueueBuffer',
-        `成功追加 ${tracksToAdd.length} 首真实轨道`,
-      );
     }
   })().finally(() => {
     hydratingPromise = null;
@@ -335,47 +332,29 @@ export async function loadQueue(
       startBvid ? videos.findIndex(v => v.bvid === startBvid) : 0,
     );
 
-    // 初始水合窗口：前1首 + 当前首 + 后 TARGET_NATIVE_BUFFER 首
-    const windowStart = Math.max(0, startIndex - 1);
-    const windowEnd = Math.min(
-      videos.length,
-      startIndex + TARGET_NATIVE_BUFFER + 1,
-    );
-    const windowVideos = videos.slice(windowStart, windowEnd);
+    const targetVideo = videos[startIndex];
 
-    const hydratedTracksArrays = await Promise.all(
-      windowVideos.map(v => hydrateVideo(v)),
-    );
-    const hydratedTracks = hydratedTracksArrays.flat();
+    // 1. 仅水合当前目标歌曲 (Fast Path)，实现秒播
+    const targetTracks = await hydrateVideo(targetVideo);
 
-    if (hydratedTracks.length === 0) {
+    if (targetTracks.length === 0) {
       usePlayerStore.getState().setPlaybackError('加载音频失败，请检查网络');
       return 0;
     }
 
+    // 2. 立即重置并播放首曲
     await TrackPlayer.reset();
-    await TrackPlayer.add(hydratedTracks);
-
-    // 计算目标轨道在原生队列中的索引
-    const targetBvid = videos[startIndex].bvid;
-    const targetNativeIndex = hydratedTracks.findIndex(
-      t => t.id === targetBvid,
-    );
-
-    if (targetNativeIndex !== -1) {
-      await TrackPlayer.skip(targetNativeIndex);
-      if (hydratedTracks[targetNativeIndex]) {
-        autoCache(hydratedTracks[targetNativeIndex].id as string);
-      }
-    } else {
-      await TrackPlayer.skip(0);
-    }
-
+    await TrackPlayer.add(targetTracks);
     await TrackPlayer.play();
+
+    if (targetTracks[0]) {
+      autoCache(targetTracks[0].id as string);
+    }
 
     usePlayerStore.getState().setQueue(videos, startBvid);
 
-    // 触发后台水合后续轨道
+    // 3. 触发后台水合后续轨道 (Slow Path)
+    // 依赖 maintainQueueBuffer 自动补齐 TARGET_NATIVE_BUFFER
     maintainQueueBuffer().catch(e => {
       LoggerService.error(
         'TrackPlayer',
