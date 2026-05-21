@@ -43,7 +43,7 @@ async function maintainQueueBuffer() {
 
     const remaining = nativeQueue.length - 1 - activeIndex;
 
-    // 增加运行时监控日志
+    // 增加运行时监控日志.
     LoggerService.info('TrackPlayer', 'maintainQueueBuffer', `nativeLength: ${nativeQueue.length}, activeIndex: ${activeIndex}, remaining: ${remaining}`);
 
     if (remaining >= MIN_NATIVE_BUFFER) return;
